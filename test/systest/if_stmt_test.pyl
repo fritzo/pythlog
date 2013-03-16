@@ -1,0 +1,238 @@
+
+
+def test_if_stmt():
+	if 0:
+		assert False
+
+def test_if_stmt_vars_written_0():
+	x = 0
+	if 1:
+		x = 1
+	assert x == 1
+
+def test_if_stmt_vars_written_1():
+	x = 0
+	if 0:
+		x = 1
+	assert x == 0
+
+def test_if_stmt_vars_read_0():
+	a = 1
+	b = 2
+	c = 0
+	if 1:
+		c = b + a
+	assert c == 3
+
+def test_if_stmt_vars_read_1():
+	a = 1
+	b = 2
+	c = 0
+	if 0:
+		c = b + a
+	assert c == 0
+
+def test_if_stmt_vars_read_and_written_0():
+	a = 1
+	b = 2
+	if 0:
+		b = b + a
+	assert b == 2
+
+def test_if_stmt_vars_read_and_written_1():
+	a = 1
+	b = 2
+	if 1:
+		b = b + a
+	assert b == 3
+
+
+
+
+
+def test_if_else_stmt_0():
+	if 1:
+		pass
+	else:
+		assert False
+
+def test_if_else_stmt_1():
+	if 0:
+		assert False
+	else:
+		pass
+
+def test_if_else_stmt_vars_written_0():
+	x = 0
+	if 1:
+		x = 1
+	else:
+		x = 2
+	assert x == 1
+
+def test_if_else_stmt_vars_written_1():
+	x = 0
+	if 0:
+		x = 1
+	else:
+		x = 2
+	assert x == 2
+
+def test_if_else_stmt_vars_read_0():
+	a = 1
+	b = 2
+	c = 0
+	if 1:
+		c = a + b
+	else:
+		c = b
+	assert c == 3
+
+def test_if_else_stmt_vars_read_1():
+	a = 1
+	b = 2
+	c = 0
+	if 0:
+		c = a
+	else:
+		c = a + b
+	assert c == 3
+
+def test_if_else_stmt_vars_read_and_written_0():
+	a = 1
+	b = 2
+	if 1:
+		b = a + b
+	else:
+		b = a
+	assert b == 3
+
+def test_if_else_stmt_vars_read_and_written_1():
+	a = 1
+	b = 2
+	if 0:
+		b = a
+	else:
+		b = a + b
+	assert b == 3
+
+
+
+
+def test_if_elif_stmt():
+	if 1:
+		pass
+	elif 1:
+		assert False
+
+def test_if_elif_stmt_vars_written_0():
+	x = 0
+	if 1:
+		x = 1
+	elif 1:
+		x = 2
+	assert x == 1
+
+def test_if_elif_stmt_vars_written_1():
+	x = 0
+	if 0:
+		x = 1
+	elif 1:
+		x = 2
+	assert x == 2
+
+def test_if_elif_stmt_vars_read_0():
+	a = 1
+	b = 2
+	c = 0
+	if 1:
+		c = a + b
+	elif 1:
+		c = a
+	assert c == 3
+
+def test_if_elif_stmt_vars_read_1():
+	a = 1
+	b = 2
+	c = 0
+	if 0:
+		c = a
+	elif 1:
+		c = a + b
+	assert c == 3
+
+
+
+def test_if_elif_else_stmt():
+	if 0:
+		assert False
+	elif 0:
+		assert False
+	else:
+		pass
+
+def test_if_elif_else_stmt_vars_written_0():
+	x = 0
+	if 0:
+		x = 1
+	elif 0:
+		x = 2
+	else:
+		x = 3
+	assert x == 3
+
+def test_if_elif_else_stmt_vars_written_1():
+	x = 0
+	if 0:
+		x = 1
+	elif 1:
+		x = 2
+	else:
+		x = 3
+	assert x == 2
+
+def test_if_elif_else_stmt_vars_read_0():
+	a = 1
+	b = 2
+	c = 0
+	if 0:
+		c = a
+	elif 0:
+		c = b
+	else:
+		c = a + b
+	assert c == 3
+
+def test_if_elif_else_stmt_vars_read_1():
+	a = 1
+	b = 2
+	c = 0
+	if 0:
+		c = a
+	elif 1:
+		c = a + b
+	else:
+		c = b
+	assert c == 3
+
+def test_if_elif_else_stmt_vars_read_and_written_0():
+	a = 1
+	b = 2
+	if 0:
+		b = a
+	elif 0:
+		b = 0
+	else:
+		b = a + b
+	assert b == 3
+
+def test_if_elif_else_stmt_vars_read_and_written_1():
+	a = 1
+	b = 2
+	if 0:
+		b = a
+	elif 1:
+		b = a + b
+	else:
+		b = 0
+	assert b == 3

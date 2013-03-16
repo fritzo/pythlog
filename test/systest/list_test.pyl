@@ -1,0 +1,51 @@
+
+def test_list_length():
+	assert len([1, 2]) == 2
+	assert len([[]]) == 1
+	assert len([]) == 0
+	assert len(["hello", 3]) == 2
+
+def test_list_equal():
+	assert [1, 2, 3] == [1, 2, 3]
+	assert [] == []
+
+def test_list_not_equal():
+	assert [1, 2, 3, 4] != [1, 2, 3, "4"]
+	assert [] != [1]
+
+def test_list_append():
+	assert [1, 2] == [1] + [2]
+
+def test_list_multiply():
+	assert [1, 2, 1, 2] == [1, 2] * 2
+	assert [] == 0 * [1, 2]
+
+def test_list_access_single_element_with_positive_index():
+	s = [1, 2, 3]
+	assert s[0] == 1
+	assert s[1] == 2
+
+def test_list_access_single_element_with_negative_index():
+	s = [1, 2]
+	assert s[-1] == 2
+	assert s[-2] == 1
+
+def test_list_solve_append_equation_with_mult_0():
+	assert [1, "a", "a", 3, "a"] == [1] + 2 * x + [3] + x
+	assert ["a"] == x
+
+def test_list_solve_append_equation_with_mult_1():
+	assert [0, 1, 1, 2] == [0] + n * [1] + [2]
+	assert n == 2
+
+def test_list_solve_subscript_equation():
+	assert [1, 2, 3, 4][n] == 3
+	assert n == 2
+
+def test_list_construction_through_assertions():
+	assert len(s) == 4
+	assert s[0] == 1
+	assert s[1] == []
+	assert s[2] == "abc"
+	assert s[3] == None
+	assert s == [1, [], "abc", None]

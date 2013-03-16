@@ -1,0 +1,58 @@
+
+
+def test_string_length():
+	assert 5 == len("hello")
+	assert 1 == len("a")
+
+def test_string_equal():
+	assert "hello" == "hello"
+	assert "a" == "a"
+
+def test_string_not_equal():
+	assert "helloo" != "hello"
+	assert "aa" != "a"
+
+def test_string_append():
+	assert "ab" == "a" + "b"
+
+def test_string_multiply():
+	assert "abab" == "ab" * 2
+	assert "" == 0 * "ab"
+
+def test_string_access_single_element_with_positive_index():
+	s = "hello"
+	assert s[0] == "h"
+	assert s[1] == "e"
+
+def test_string_access_single_element_with_negative_index():
+	s = "world"
+	assert s[-1] == "d"
+	assert s[-2] == "l"
+
+def test_string_stringify_int():
+	assert str(1) == "1"
+	assert str(12093) == "12093"
+
+def test_string_stringify_list():
+	assert str([1, 2]) == "[1, 2]"
+	# TODO: stringifying list of strings is not correct
+	#assert str(["a"]) == "['a']"
+
+def test_string_solve_append_equation_with_mult_0():
+	assert "abbcb" == "a" + 2 * x + "c" + x
+	assert "b" == x
+
+def test_string_solve_append_equation_with_mult_1():
+	assert "abbcb" == "a" + n * "b" + "cb"
+	assert n == 2
+
+def test_string_solve_subscript_equation():
+	assert "abbcb"[n] == "c"
+	assert n == 3
+
+def test_string_construction_through_assertions():
+	assert len(s) == 3
+	assert s[0] == "a"
+	assert s[1] == s[2]
+	assert s[1] == "b"
+	assert s == "abb"

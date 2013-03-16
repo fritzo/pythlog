@@ -1,0 +1,17 @@
+
+
+class MyClass:
+	def __init__(self, field_a, field_b):
+		self.field_a = field_a
+		self.field_b = field_b
+
+
+def test_class_instantiate():
+	c = MyClass(10, "a")
+	assert c.field_a == 10
+	assert c.field_b == "a"
+
+def test_class_construct_from_asserts():
+	assert c.field_a == 10
+	assert c.field_b == 20
+	assert str(c) == "MyClass(10, 20)"

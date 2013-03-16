@@ -1,0 +1,14 @@
+
+
+def test_list_comprehension_not_reading_local_vars():
+	list = [1, 2, 3]
+	result = [l * 2 for l in list]
+	assert result == [2, 4, 6]
+	assert l == 3
+
+# TODO: list comprehensions can't read local vars yet.
+def test_list_comprehension_reading_local_vars():
+	list = [4, 5]
+#	var = 2
+#	print [l - var for l in list]
+#	assert [2, 3] == [l - var for l in list]
