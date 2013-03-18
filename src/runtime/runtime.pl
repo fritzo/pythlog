@@ -27,9 +27,17 @@ pl_eq(pl_int(L), pl_int(R), pl_bool(Z)) :-
 	Z #<==> (L #= R).
 pl_eq(X, X, pl_bool(1)).
 
+pl_gt(pl_int(L), pl_int(R), pl_bool(Z)) :-
+	Z #<==> (L #> R).
+
 pl_gte(pl_int(L), pl_int(R), pl_bool(Z)) :-
 	Z #<==> (L #>= R).
 
+pl_lt(pl_int(L), pl_int(R), pl_bool(Z)) :-
+	Z #<==> (L #< R).
+
+pl_lte(pl_int(L), pl_int(R), pl_bool(Z)) :-
+	Z #<==> (L #=< R).
 
 pl_mod(pl_int(L), pl_int(R), pl_int(Z)) :-
 	Z #= L mod R.
@@ -106,7 +114,7 @@ f_str(pl_seq(list, L), pl_seq(str, S)) :-
 	fi_str_list(L, "[", Tmp),
 	append(Tmp, "]", S).
 
-f_str(pl_int(I), pl_seq(str, "free")) :-
+f_str(pl_int(I), pl_seq(str, "?free")) :-
 	var(I).
 
 f_str(pl_object(Type, Attrs), pl_seq(str, Result)) :-
