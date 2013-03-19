@@ -14,14 +14,16 @@ pl_and(L, R, pl_bool(Z)) :-
 	pl_bool(R, pl_bool(BR)),
 	pli_and(BL, BR, Z).
 
-pli_assert(pl_bool(1), _).
-pli_assert(pl_bool(0), Msg) :-
-	write('AssertionError: '),
-	pl_print([Msg], 1),
+pli_assert(pl_bool(1), _, IO, IO).
+pli_assert(pl_bool(0), _Msg, IO, IO) :-
+% TODO: How is text printed ONLY when the assert actually will fail?
+% That is, when backtracking wont help?
+%	io_write('AssertionError: ', InIO, NextIO),
+%	pl_print([Msg], 1, NextIO, OutIO),
 	fail.
-pl_assert(Obj, Msg) :-
+pl_assert(Obj, Msg, InIO, OutIO) :-
 	pl_bool(Obj, Bool),
-	pli_assert(Bool, Msg).
+	pli_assert(Bool, Msg, InIO, OutIO).
 
 
 pl_bool(pl_bool(B), pl_bool(B)).
@@ -89,21 +91,21 @@ pl_or(L, R, pl_bool(Z)) :-
 pl_pow(pl_int(L), pl_int(R), pl_int(Z)) :-
 	Z #= L ^ R.
 
-pli_print(pl_seq(str, CharList)) :-
+pli_print(pl_seq(str, CharList), InIO, OutIO) :-
 	string_to_list(Str, CharList),
-	write(Str).
-pl_print([Obj], 0) :-
-	f_str(Obj, Str),
-	pli_print(Str).
-pl_print([Obj], 1) :-
-	f_str(Obj, Str),
-	pli_print(Str),
-	nl.	
-pl_print([Obj|Objs], NewLine) :-
-	f_str(Obj, Str),
-	pli_print(Str),
-	write(' '),
-	pl_print(Objs, NewLine).
+	io_write(Str, InIO, OutIO).
+pl_print([Obj], 0, InIO, OutIO) :-
+	f_str(Obj, Str, _, _),
+	pli_print(Str, InIO, OutIO).
+pl_print([Obj], 1, InIO, OutIO) :-
+	f_str(Obj, Str, _, _),
+	pli_print(Str, InIO, NextIO),
+	io_write('\n', NextIO, OutIO).
+pl_print([Obj|Objs], NewLine, InIO, OutIO) :-
+	f_str(Obj, Str, _, _),
+	pli_print(Str, InIO, IO_0),
+	io_write(' ', IO_0, IO_1),
+	pl_print(Objs, NewLine, IO_1, OutIO).
 
 pl_solve(pl_bool(1)).
 
@@ -129,23 +131,23 @@ pl_sub(pl_int(L), pl_int(R), pl_int(Z)) :-
 
 % builtins
 
-f_len(pl_seq(Type, S), pl_int(N)) :-
+f_len(pl_seq(Type, S), pl_int(N), IO, IO) :-
 	length(S, N),
 	nth0(_, [str, list], Type).
 
 
-f_str(pl_seq(str, S), pl_seq(str, S)).
-f_str(pl_int(I), pl_seq(str, S)) :-
+f_str(pl_seq(str, S), pl_seq(str, S), IO, IO).
+f_str(pl_int(I), pl_seq(str, S), IO, IO) :-
 	integer(I),
 	number_codes(I, S).
-f_str(pl_seq(list, L), pl_seq(str, S)) :-
+f_str(pl_seq(list, L), pl_seq(str, S), IO, IO) :-
 	fi_str_list(L, "[", Tmp),
 	append(Tmp, "]", S).
 
-f_str(pl_int(I), pl_seq(str, "?free")) :-
+f_str(pl_int(I), pl_seq(str, "?free"), IO, IO) :-
 	var(I).
 
-f_str(pl_object(Type, Attrs), pl_seq(str, Result)) :-
+f_str(pl_object(Type, Attrs), pl_seq(str, Result), IO, IO) :-
 	name(Type, InternalName),
 	length(StrPrefix, 2),
 	append(StrPrefix, TypeName, InternalName),
@@ -156,10 +158,17 @@ f_str(pl_object(Type, Attrs), pl_seq(str, Result)) :-
 
 
 fi_str_list([Obj], Acc, Result) :-
-	f_str(Obj, pl_seq(str, ObjStr)),
+	f_str(Obj, pl_seq(str, ObjStr), _, _),
 	append(Acc, ObjStr, Result).
 fi_str_list([Obj|Objs], Acc, Result) :-
-	f_str(Obj, pl_seq(str, ObjStr)),
+	f_str(Obj, pl_seq(str, ObjStr), _, _),
 	append(Acc, ObjStr, T0),
 	append(T0, ", ", NextAcc),
 	fi_str_list(Objs, NextAcc, Result).
+
+
+% io handling
+
+io_write(Str, InIO, OutIO) :-
+	append(InIO, [Str], OutIO). % TODO: Appending like this is inefficient
+

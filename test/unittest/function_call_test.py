@@ -9,9 +9,10 @@ def f():
 def g():
 	pass
 """)
-		exp = """f_f(ReturnValue) :- 
-    f_g(T0),
-    ReturnValue = pl_None."""
+		exp = """f_f(ReturnValue, InIO, OutIO) :- 
+    f_g(T0, InIO, IO1),
+    ReturnValue = pl_None,
+    OutIO = IO1."""
 		print code
 		self.assertTrue(exp in code)
 
@@ -22,9 +23,10 @@ def f():
 def g(a, b):
 	pass
 """)
-		exp = """f_f(ReturnValue) :- 
-    f_g(pl_int(1), pl_int(2), T0),
-    ReturnValue = pl_None."""
+		exp = """f_f(ReturnValue, InIO, OutIO) :- 
+    f_g(pl_int(1), pl_int(2), T0, InIO, IO1),
+    ReturnValue = pl_None,
+    OutIO = IO1."""
 		self.assertTrue(exp in code)
 
 
@@ -35,8 +37,10 @@ def f():
 def g(a, b):
 	return 1
 """)
-		exp = """f_f(ReturnValue) :- 
-    f_g(pl_int(1), pl_int(2), T0),
+		exp = """f_f(ReturnValue, InIO, OutIO) :- 
+    f_g(pl_int(1), pl_int(2), T0, InIO, IO1),
     V_x_0 = T0,
-    ReturnValue = pl_None."""
+    ReturnValue = pl_None,
+    OutIO = IO1."""
+		print code
 		self.assertTrue(exp in code)

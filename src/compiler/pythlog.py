@@ -111,16 +111,17 @@ def new_value_for_var(varname, local_vars):
 class ExprVisitor(ast.NodeVisitor):
     def __init__(self, local_vars, temp_vars, stmts, global_symbols,
                  name_allocator, out_predicates, attrs_writable,
-                 free_vars):
+                 io_manager, free_vars):
         self._local_vars = local_vars
         self._temp_vars = temp_vars
         self._stmts = stmts
         self._global_symbols = global_symbols
         self._name_allocator = name_allocator
-        self._free_vars = free_vars # Whether or not free variables are allowed
-        self._attrs_writable = attrs_writable
-        self._free_vars_used = False
         self._out_predicates = out_predicates
+        self._attrs_writable = attrs_writable
+        self._io_manager = io_manager
+        self._free_vars = free_vars # Whether or not free variables are allowed
+        self._free_vars_used = False
 
     def _expr_builder(self, stmts):
         return ExprVisitor(self._local_vars,
@@ -130,6 +131,7 @@ class ExprVisitor(ast.NodeVisitor):
                             self._name_allocator,
                             self._out_predicates,
                             self._attrs_writable,
+                            self._io_manager,
                             self._free_vars)
 
 
@@ -192,17 +194,19 @@ class ExprVisitor(ast.NodeVisitor):
 #            condition = []
 
         elem_expr = expr_builder.visit(node.elt)
-        self._out_predicates.append("%s([], [])." % pred_name)
-        args = ["[%s|Rest]" % gen_var,
-                "[%s|%s]" % (elem_expr, iterator)]
-        expr_stmts.append("%s(Rest, %s)" % (pred_name, iterator)) 
-        self._out_predicates.append(predicate_for_function(pred_name, args, expr_stmts))
+        self._out_predicates.append("%s([], [], IO, IO)." % pred_name)
+        pred_args = ["[%s|Rest]" % gen_var,
+                     "[%s|%s]" % (elem_expr, iterator)]
+        pred_io = expr_builder._io_manager.current_io_var_name()
+        expr_stmts.append("%s(Rest, %s, %s, OutIO)" % (pred_name, iterator, pred_io)) 
+        self._out_predicates.append(predicate_for_function(pred_name, pred_args, expr_stmts))
 
         result = self._new_temp_var()
         unwrapped_iter = self._new_temp_var()
         unwrapped_result = self._new_temp_var()
+        io0, io1 = self._io_manager.new_io_var_name()
         self._stmts.append("%s = pl_seq(_, %s)" % (iterator, unwrapped_iter))
-        self._stmts.append("%s(%s, %s)" % (pred_name, unwrapped_iter, unwrapped_result))
+        self._stmts.append("%s(%s, %s, %s, %s)" % (pred_name, unwrapped_iter, unwrapped_result, io0, io1))
         self._stmts.append("%s = pl_seq(list, %s)" % (result, unwrapped_result))
         return result
 
@@ -273,7 +277,9 @@ class ExprVisitor(ast.NodeVisitor):
         func_args = [self.visit(a) for a in node.args]
         func = self.visit(node.func)
         result = self._new_temp_var()
-        self._stmts.append("%s(%s)" % (func, ", ".join(func_args + [result])))
+        io0, io1 = self._io_manager.new_io_var_name()
+        call_args = func_args + [result, io0, io1]
+        self._stmts.append("%s(%s)" % (func, ", ".join(call_args)))
         return result
 
 
@@ -302,6 +308,7 @@ class StatementListCompiler(ast.NodeVisitor):
         self._attrs_writable = attrs_writable
         self._out_stmts = []
         self._out_predicates = []
+        self._io_manager = IoManager()
 
     def _expr_visitor(self, free_vars=False):
         return ExprVisitor(self._local_vars,
@@ -311,6 +318,7 @@ class StatementListCompiler(ast.NodeVisitor):
                            self._name_allocator,
                            self._out_predicates,
                            self._attrs_writable,
+                           self._io_manager,
                            free_vars)
 
     def _add_stmt(self, stmt):
@@ -324,7 +332,8 @@ class StatementListCompiler(ast.NodeVisitor):
     def visit_Print(self, node):
         expr = self._expr_visitor()
         values = ", ".join(expr.visit(v) for v in node.values)
-        self._add_stmt('pl_print([%s], %s)' % (values, int(node.nl)))
+        io0, io1 = self._io_manager.new_io_var_name()
+        self._add_stmt('pl_print([%s], %s, %s, %s)' % (values, int(node.nl), io0, io1))
 
     def visit_Expr(self, node):
         self._expr_visitor().visit(node.value)
@@ -340,7 +349,8 @@ class StatementListCompiler(ast.NodeVisitor):
         if expr_visitor.free_vars_used():
             self._add_stmt("pl_solve(%s)" % expr)
         else:
-            self._add_stmt("pl_assert(%s, %s)" % (expr, msg))
+            io0, io1 = self._io_manager.new_io_var_name()
+            self._add_stmt("pl_assert(%s, %s, %s, %s)" % (expr, msg, io0, io1))
 
     def visit_Assign(self, node):
         assert len(node.targets) == 1
@@ -383,18 +393,21 @@ class StatementListCompiler(ast.NodeVisitor):
         then_stmts.insert(0, 'pl_bool(True, pl_bool(1))')
         for varname in vars_not_written_in_then:
             then_stmts.append("%s = %s" % (self._local_vars[varname], old_local_vars[varname]))
+        then_stmts.append('OutIO = %s' % then_compiler._io_manager.current_io_var_name())
 
         else_stmts.insert(0, 'pl_bool(False, pl_bool(0))')
         for varname in vars_not_written_in_else:
             else_stmts.append("%s = %s" % (self._local_vars[varname], old_local_vars[varname]))
+        else_stmts.append('OutIO = %s' % else_compiler._io_manager.current_io_var_name())
         
-
+        
         inout_args = ([old_local_vars[v] for v in list(vars_loaded.union(vars_stored))] + 
                       [self._local_vars[v] for v in list(vars_stored)])
 
         then_pred_args = ["True"] + inout_args
         else_pred_args = ["False"] + inout_args
-        call_args = [test_var] + inout_args
+        io0, io1 = self._io_manager.new_io_var_name()
+        call_args = [test_var] + inout_args + [io0, io1]
 
         self._add_stmt("%s(%s)" % (pred_name, ", ".join(call_args)))
         self._out_predicates.extend(else_extra_preds)
@@ -404,8 +417,9 @@ class StatementListCompiler(ast.NodeVisitor):
 
 
 
-def predicate_for_function(pred_name, pred_args, pred_stmts):
-    head = "%s(%s)" % (pred_name, ", ".join(pred_args))
+def predicate_for_function(pred_name, pred_args, pred_stmts, io=True):
+    args = pred_args + ['InIO', 'OutIO'] * io
+    head = "%s(%s)" % (pred_name, ", ".join(args))
     if len(pred_stmts) == 0:
         return head + "."
     else:
@@ -430,6 +444,22 @@ class NameAllocator:
     def cond_pred_name(self):
         return self._base_name + "_cond%s" % self._alloc_num()
 
+class IoManager:
+    def __init__(self):
+        self._io_var_count = 0
+
+    def current_io_var_name(self):
+        if self._io_var_count == 0:
+            return "InIO"
+        else:
+            return "IO%s" % self._io_var_count
+
+    def new_io_var_name(self):
+        io0 = self.current_io_var_name()
+        self._io_var_count += 1
+        io1 = self.current_io_var_name()
+        return io0, io1
+
 class FunctionCompiler(ast.NodeVisitor):
     def __init__(self, name, args, id, global_symbols):
         self._name = name
@@ -446,6 +476,7 @@ class FunctionCompiler(ast.NodeVisitor):
         pred_stmts, predicates = self._stmts_list_compiler.visit_stmt_list(stmt_list)
         if not(has_return_stmt(stmt_list)):
             pred_stmts.append('ReturnValue = pl_None')
+        pred_stmts.append('OutIO = %s' % self._stmts_list_compiler._io_manager.current_io_var_name())
         pred_args = ["V_%s_0" % a for a in self._args] + ["ReturnValue"]
         pred_name = "f_%s" % self._name
         return predicates + [predicate_for_function(pred_name, pred_args, pred_stmts)]
@@ -488,7 +519,7 @@ class ClassCompiler(ast.NodeVisitor):
         for attr in self._attrs:
             obj = "pl_object(f_%s, [%s])" % (self._class_name, ", ".join(fields))
             args = [obj, "f_" + attr, local_vars[attr]]
-            pred = predicate_for_function("pl_getattr", args, [])
+            pred = predicate_for_function("pl_getattr", args, [], io=False)
             self._out_predicates.append(pred)
 
     def visit_FunctionDef(self, node):

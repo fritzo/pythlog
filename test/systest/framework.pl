@@ -2,7 +2,7 @@
 
 
 testing_predicate(Predicate) :-
-	current_predicate(Predicate/1),
+	current_predicate(Predicate/3),
 	name(Predicate, PredName),
 	append("f_test_", _, PredName).
 
@@ -12,9 +12,15 @@ test_name(TestPred, TestName) :-
 	string_to_list(TestName, TestNameCharList).
 
 
+write_io([]).
+write_io([H|T]) :-
+	write(H),
+	write_io(T).
+
 run_test(Pred) :-
 	test_name(Pred, TestName),
-	(call(Pred, _) ->
+	(call(Pred, _, [], OutIO) ->
+		write_io(OutIO),
 		write('.');
 		nl, write('Test failed: '), write(TestName), nl, fail).
 
