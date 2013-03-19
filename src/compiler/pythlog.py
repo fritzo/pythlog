@@ -214,7 +214,7 @@ class ExprVisitor(ast.NodeVisitor):
         if not self._attrs_writable:
             assert node.ctx.__class__ == ast.Load().__class__, ast.dump(node)
         if node.value.id == 'self': # TODO: Too much hardcoding
-            return "V_%s_%s" % (node.value.id, node.attr)
+            return "Self_%s" % node.attr
         obj = self.visit(node.value)
         attrname = node.attr
         result = self._new_temp_var()
@@ -272,8 +272,19 @@ class ExprVisitor(ast.NodeVisitor):
         stmt = "pl_subscript(%s, %s, %s)" % (value, arg, result)
         self._stmts.append(stmt)
         return result
+
+    def visit_MethodCall(self, node):
+        obj = self.visit(node.func.value)
+        pred_name = "f_" + node.func.attr
+        result = self._new_temp_var()
+        io0, io1 = self._io_manager.new_io_var_name()
+        pred_args = [obj] + [self.visit(a) for a in node.args] + [result, io0, io1]
+        self._stmts.append("%s(%s)" % (pred_name, ", ".join(pred_args)))
+        return result
         
     def visit_Call(self, node):
+        if node.func.__class__ == ast.Attribute:
+            return self.visit_MethodCall(node)
         func_args = [self.visit(a) for a in node.args]
         func = self.visit(node.func)
         result = self._new_temp_var()
@@ -497,7 +508,7 @@ class ClassCompiler(ast.NodeVisitor):
 
     def visit_CtorDef(self, node):
         self._attrs = sorted(written_self_attrs(node.body))
-        args = [a.id for a in node.args.args[1:]]
+        args = [a.id for a in node.args.args[1:]] # Skip 'self'
         local_vars = dict((a, "V_%s_0" % a) for a in args)
         temp_vars = TemporaryVariables()
         allocator = NameAllocator("%s_%s" % (self._class_name, self._id))
@@ -508,17 +519,19 @@ class ClassCompiler(ast.NodeVisitor):
                                          attrs_writable=True)
 
         pred_stmts, predicates = compiler.visit_stmt_list(node.body)
-        fields = [local_vars[a] for a in self._attrs]
+        fields = ["Self_%s" % a for a in self._attrs]
         return_stmt = "ReturnValue = pl_object(f_%s, [%s])" % (self._class_name, ", ".join(fields))
         pred_stmts.append(return_stmt)
+        pred_stmts.append('OutIO = %s' % compiler._io_manager.current_io_var_name())
+
         pred_args = ["V_%s_0" % a for a in args] + ["ReturnValue"]
         pred_name = "f_%s" % self._class_name
         pred = predicate_for_function(pred_name, pred_args, pred_stmts)
         self._out_predicates.append(pred)
 
+        obj = "pl_object(f_%s, [%s])" % (self._class_name, ", ".join(fields))
         for attr in self._attrs:
-            obj = "pl_object(f_%s, [%s])" % (self._class_name, ", ".join(fields))
-            args = [obj, "f_" + attr, local_vars[attr]]
+            args = [obj, "f_" + attr, "Self_" + attr]
             pred = predicate_for_function("pl_getattr", args, [], io=False)
             self._out_predicates.append(pred)
 
@@ -526,7 +539,23 @@ class ClassCompiler(ast.NodeVisitor):
         if node.name == '__init__':
             self.visit_CtorDef(node)
             return
-        print ast.dump(node)
+        args = [a.id for a in node.args.args[1:]] # Skip 'self'
+        local_vars = dict((a, "V_%s_0" % a) for a in args)
+        temp_vars = TemporaryVariables()
+        allocator = NameAllocator("%s_%s_" % (node.name, self._id))
+        compiler = StatementListCompiler(local_vars,
+                                         temp_vars,
+                                         allocator,
+                                         self._global_symbols)
+        pred_stmts, predicates = compiler.visit_stmt_list(node.body)
+        pred_stmts.append('OutIO = %s' % compiler._io_manager.current_io_var_name())
+
+        fields = ["Self_%s" % a for a in self._attrs]
+        obj = "pl_object(f_%s, [%s])" % (self._class_name, ", ".join(fields))
+        pred_args = [obj] + ["V_%s_0" % a for a in args] + ["ReturnValue"]
+        pred_name = "f_%s" % node.name
+        pred = predicate_for_function(pred_name, pred_args, pred_stmts)
+        self._out_predicates.append(pred)
 
 
 def compile_module(module_code):

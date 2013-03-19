@@ -5,14 +5,28 @@ class MyClass:
 		self.field_a = field_a
 		self.field_b = field_b
 
+	def func_a(self, arg):
+		return self.field_a * arg
+
+	def func_b(self, arg):
+		return self.field_b * arg
+
 
 def test_class_instantiate():
 	c = MyClass(10, "a")
 	assert c.field_a == 10
 	assert c.field_b == "a"
 
-def test_class_construct_from_asserts():
+def test_class_call_method_on_object():
+	c = MyClass(10, 2)
+	assert 20 == c.func_a(2)
+
+def test_class_construct_object_from_asserts_on_fields():
 	assert c.field_a == 10
 	assert c.field_b == 20
 	assert str(c) == "MyClass(10, 20)"
 
+def test_class_construct_object_from_asserts_on_method():
+	assert c.func_a(4) == 12
+	assert c.func_b(3) == -18
+	assert str(c) == "MyClass(3, -6)"
