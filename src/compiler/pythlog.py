@@ -226,6 +226,25 @@ class ExprVisitor(ast.NodeVisitor):
         self._stmts.append(stmt)
         return result
 
+    def visit_UnaryOp(self, node):
+        operand = self.visit(node.operand)
+        op = "pl_" + node.op.__class__.__name__.lower()
+        result = self._new_temp_var()
+        stmt = "%s(%s, %s)" % (op, operand, result)
+        self._stmts.append(stmt)
+        return result
+
+    def visit_BoolOp(self, node):
+        op = "pl_" + node.op.__class__.__name__.lower()
+        values = [self.visit(v) for v in node.values]
+        last_result = values[0]
+        for v in values[1:]:
+            result = self._new_temp_var()
+            stmt = "%s(%s, %s, %s)" % (op, last_result, v, result)
+            self._stmts.append(stmt)
+            last_result = result
+        return result
+
     def visit_Compare(self, node):
         assert len(node.ops) == 1
         assert len(node.comparators) == 1
@@ -313,6 +332,7 @@ class StatementListCompiler(ast.NodeVisitor):
     def visit_Assert(self, node):
         expr_visitor = self._expr_visitor(free_vars=True)
         expr = expr_visitor.visit(node.test)
+        assert expr is not None, ast.dump(node)
         if node.msg is not None:
             msg = self._expr_visitor().visit(node.msg)
         else:

@@ -1,0 +1,23 @@
+
+def test_logic_not():
+	assert not False
+	assert not 0
+	assert not not True
+	assert not not 1
+	assert not not 10
+
+def test_logic_or():
+	assert True or False
+	assert False or True
+	assert True or True
+	assert not (False or False)
+
+	assert True or 0
+	assert 1 or False
+	assert 0 or 1
+	assert not (0 or 0)
+
+def test_logic_and():
+	assert True and True
+	assert 1 and 1
+	assert not (True and 0)

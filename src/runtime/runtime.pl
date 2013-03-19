@@ -5,6 +5,15 @@ pl_add(pl_int(L), pl_int(R), pl_int(Z)) :-
 pl_add(pl_seq(Type, L), pl_seq(Type, R), pl_seq(Type, Z)) :-
 	append(L, R, Z).
 
+pli_and(1, 1, 1).
+pli_and(0, 1, 0).
+pli_and(1, 0, 0).
+pli_and(0, 0, 0).
+pl_and(L, R, pl_bool(Z)) :-
+	pl_bool(L, pl_bool(BL)),
+	pl_bool(R, pl_bool(BR)),
+	pli_and(BL, BR, Z).
+
 pli_assert(pl_bool(1), _).
 pli_assert(pl_bool(0), Msg) :-
 	write('AssertionError: '),
@@ -56,6 +65,11 @@ pl_mult_seq(Acc, Seq, Times, Product) :-
 	NextTimes #= Times - 1,
 	pl_mult_seq(NextAcc, Seq, NextTimes, Product).
 
+pli_not(0, 1).
+pli_not(1, 0).
+pl_not(L, pl_bool(Z)) :-
+	pl_bool(L, pl_bool(BL)),
+	pli_not(BL, Z).
 
 pl_noteq(pl_int(L), pl_int(R), pl_bool(Z)) :-
 	Z #<==> (L #\= R).
@@ -63,18 +77,28 @@ pl_noteq(X, X, pl_bool(0)).
 pl_noteq(pl_seq(Type, L), pl_seq(Type, R), pl_bool(1)) :-
 	L \== R.
 
+pl_or(L, R, pl_bool(Z)) :-
+	pl_bool(L, pl_bool(BL)),
+	pl_bool(R, pl_bool(BR)),
+	Z #= BL #\/ BR.
+
 pl_pow(pl_int(L), pl_int(R), pl_int(Z)) :-
 	Z #= L ^ R.
 
 pli_print(pl_seq(str, CharList)) :-
 	string_to_list(Str, CharList),
 	write(Str).
-pl_print([], 0).
-pl_print([], 1) :-
+pl_print([Obj], 0) :-
+	f_str(Obj, Str),
+	pli_print(Str).
+pl_print([Obj], 1) :-
+	f_str(Obj, Str),
+	pli_print(Str),
 	nl.	
 pl_print([Obj|Objs], NewLine) :-
 	f_str(Obj, Str),
 	pli_print(Str),
+	write(' '),
 	pl_print(Objs, NewLine).
 
 pl_solve(pl_bool(1)).
