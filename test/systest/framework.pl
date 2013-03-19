@@ -12,15 +12,24 @@ test_name(TestPred, TestName) :-
 	string_to_list(TestName, TestNameCharList).
 
 
-write_io([]).
-write_io([H|T]) :-
+write_io(_TestName, []).
+write_io(TestName, [H|T]) :-
+	nl, write(TestName), write(':'), nl,
+	write('-------------------------------------------'), nl,
+	do_write_io([H|T]),
+	write('-------------------------------------------'), nl.
+
+do_write_io([]).
+do_write_io([H|T]) :-
 	write(H),
-	write_io(T).
+	do_write_io(T).
+
 
 run_test(Pred) :-
 	test_name(Pred, TestName),
+%	write(TestName), nl,
 	(call(Pred, _, [], OutIO) ->
-		write_io(OutIO),
+		write_io(TestName, OutIO),
 		write('.');
 		nl, write('Test failed: '), write(TestName), nl, fail).
 

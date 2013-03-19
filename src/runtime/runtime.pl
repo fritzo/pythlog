@@ -136,35 +136,45 @@ f_len(pl_seq(Type, S), pl_int(N), IO, IO) :-
 	nth0(_, [str, list], Type).
 
 
-f_str(pl_seq(str, S), pl_seq(str, S), IO, IO).
-f_str(pl_int(I), pl_seq(str, S), IO, IO) :-
+f_repr(pl_seq(str, S), pl_seq(str, Repr), IO, IO) :-
+	append("'", S, T0),
+	append(T0, "'", Repr).
+f_repr(pl_seq(list, L), pl_seq(str, S), IO, IO) :-
+	fi_repr_list(L, "[", Tmp),
+	append(Tmp, "]", S).
+f_repr(pl_int(I), pl_seq(str, S), IO, IO) :-
 	integer(I),
 	number_codes(I, S).
-f_str(pl_seq(list, L), pl_seq(str, S), IO, IO) :-
-	fi_str_list(L, "[", Tmp),
-	append(Tmp, "]", S).
+f_repr(pl_None, pl_seq(str, "None"), IO, IO).
 
+f_str(pl_seq(str, S), pl_seq(str, S), IO, IO).
+f_str(pl_int(I), S, IO, IO) :-
+	f_repr(pl_int(I), S, _, _).
+f_str(pl_seq(list, L), S, IO, IO) :-
+	f_repr(pl_seq(list, L), S, _, _).
 f_str(pl_int(I), pl_seq(str, "?free"), IO, IO) :-
 	var(I).
-
+f_str(pl_None, S, IO, IO) :-
+	f_repr(pl_None, S, _, _).
 f_str(pl_object(Type, Attrs), pl_seq(str, Result), IO, IO) :-
 	name(Type, InternalName),
 	length(StrPrefix, 2),
 	append(StrPrefix, TypeName, InternalName),
 	append(TypeName, "(", T0),
-	fi_str_list(Attrs, T0, T1),
+	fi_repr_list(Attrs, T0, T1),
 	append(T1, ")", Result).
 
 
 
-fi_str_list([Obj], Acc, Result) :-
-	f_str(Obj, pl_seq(str, ObjStr), _, _),
+fi_repr_list([], Result, Result).
+fi_repr_list([Obj], Acc, Result) :-
+	f_repr(Obj, pl_seq(str, ObjStr), _, _),
 	append(Acc, ObjStr, Result).
-fi_str_list([Obj|Objs], Acc, Result) :-
-	f_str(Obj, pl_seq(str, ObjStr), _, _),
+fi_repr_list([Obj|Objs], Acc, Result) :-
+	f_repr(Obj, pl_seq(str, ObjStr), _, _),
 	append(Acc, ObjStr, T0),
 	append(T0, ", ", NextAcc),
-	fi_str_list(Objs, NextAcc, Result).
+	fi_repr_list(Objs, NextAcc, Result).
 
 
 % io handling

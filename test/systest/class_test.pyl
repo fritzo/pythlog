@@ -30,3 +30,8 @@ def test_class_construct_object_from_asserts_on_method():
 	assert c.func_a(4) == 12
 	assert c.func_b(3) == -18
 	assert str(c) == "MyClass(3, -6)"
+
+def test_class_search_list_for_object():
+	l = [MyClass(1, 2), MyClass(2, 3), MyClass(4, 5), MyClass(5, 6)]
+	assert l[n].field_a * 2 == l[n].field_b + 1
+	assert str(n) == "1"
