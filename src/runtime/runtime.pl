@@ -34,7 +34,11 @@ pl_div(pl_int(L), pl_int(R), pl_int(Z)) :-
 
 pl_eq(pl_int(L), pl_int(R), pl_bool(Z)) :-
 	Z #<==> (L #= R).
-pl_eq(X, X, pl_bool(1)).
+pl_eq(X, X, pl_bool(1)) :-
+	not(pl_int(_) = X).
+pl_eq(X, Y, pl_bool(0)) :-
+	X \= Y,
+	not(pl_int(_) = X).
 
 pl_gt(pl_int(L), pl_int(R), pl_bool(Z)) :-
 	Z #<==> (L #> R).

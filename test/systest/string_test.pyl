@@ -7,10 +7,12 @@ def test_string_length():
 def test_string_equal():
 	assert "hello" == "hello"
 	assert "a" == "a"
+	assert not "a" == "hello"
 
 def test_string_not_equal():
 	assert "helloo" != "hello"
 	assert "aa" != "a"
+	assert not "a" != "a"
 
 def test_string_append():
 	assert "ab" == "a" + "b"
