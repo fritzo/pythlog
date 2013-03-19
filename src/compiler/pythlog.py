@@ -51,7 +51,7 @@ class TemporaryVariables:
     def __init__(self):
         self._id = 0
 
-    def _new_temp_var(self):
+    def new_temp_var(self):
         var = "T%s" % self._id
         self._id += 1
         return var
@@ -142,7 +142,7 @@ class ExprVisitor(ast.NodeVisitor):
         return new_value_for_var(varname, self._local_vars)
 
     def _new_temp_var(self):
-        return self._temp_vars._new_temp_var()
+        return self._temp_vars.new_temp_var()
 
     def visit_Name(self, node):
         if node.id == 'True':
@@ -213,7 +213,7 @@ class ExprVisitor(ast.NodeVisitor):
     def visit_Attribute(self, node):
         if not self._attrs_writable:
             assert node.ctx.__class__ == ast.Load().__class__, ast.dump(node)
-        if node.value.id == 'self': # TODO: Too much hardcoding
+        if node.value.__class__ == ast.Name and node.value.id == 'self': # TODO: Too much hardcoding
             return "Self_%s" % node.attr
         obj = self.visit(node.value)
         attrname = node.attr
@@ -379,6 +379,8 @@ class StatementListCompiler(ast.NodeVisitor):
         pred_name = self._name_allocator.if_pred_name()
         expr = self._expr_visitor()
         test_var = expr.visit(node.test)
+        test_var_bool = self._temp_vars.new_temp_var()
+        self._add_stmt("pl_bool(%s, pl_bool(%s))" % (test_var, test_var_bool))
 
         vars_loaded, vars_stored = accessed_variables(node.body, node.orelse)
         vars_loaded.difference_update(self._global_symbols)
@@ -401,12 +403,10 @@ class StatementListCompiler(ast.NodeVisitor):
         for varname in vars_stored:
             new_value_for_var(varname, self._local_vars)
 
-        then_stmts.insert(0, 'pl_bool(True, pl_bool(1))')
         for varname in vars_not_written_in_then:
             then_stmts.append("%s = %s" % (self._local_vars[varname], old_local_vars[varname]))
         then_stmts.append('OutIO = %s' % then_compiler._io_manager.current_io_var_name())
 
-        else_stmts.insert(0, 'pl_bool(False, pl_bool(0))')
         for varname in vars_not_written_in_else:
             else_stmts.append("%s = %s" % (self._local_vars[varname], old_local_vars[varname]))
         else_stmts.append('OutIO = %s' % else_compiler._io_manager.current_io_var_name())
@@ -415,10 +415,11 @@ class StatementListCompiler(ast.NodeVisitor):
         inout_args = ([old_local_vars[v] for v in list(vars_loaded.union(vars_stored))] + 
                       [self._local_vars[v] for v in list(vars_stored)])
 
-        then_pred_args = ["True"] + inout_args
-        else_pred_args = ["False"] + inout_args
+        then_pred_args = ["1"] + inout_args
+        else_pred_args = ["0"] + inout_args
         io0, io1 = self._io_manager.new_io_var_name()
-        call_args = [test_var] + inout_args + [io0, io1]
+
+        call_args = [test_var_bool] + inout_args + [io0, io1]
 
         self._add_stmt("%s(%s)" % (pred_name, ", ".join(call_args)))
         self._out_predicates.extend(else_extra_preds)
