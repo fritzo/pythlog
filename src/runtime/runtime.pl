@@ -91,21 +91,22 @@ pl_or(L, R, pl_bool(Z)) :-
 pl_pow(pl_int(L), pl_int(R), pl_int(Z)) :-
 	Z #= L ^ R.
 
-pli_print(pl_seq(str, CharList), InIO, OutIO) :-
+pli_print(pl_seq(str, CharList), Backtrack, InIO, OutIO) :-
 	string_to_list(Str, CharList),
-	io_write(Str, InIO, OutIO).
-pl_print([Obj], 0, InIO, OutIO) :-
+	io_write(Str, Backtrack, InIO, OutIO).
+pl_print([Obj], 0, Backtrack, InIO, OutIO) :-
 	f_str(Obj, Str, _, _),
-	pli_print(Str, InIO, OutIO).
-pl_print([Obj], 1, InIO, OutIO) :-
+	pli_print(Str, Backtrack, InIO, OutIO).
+pl_print([Obj], 1, Backtrack, InIO, OutIO) :-
 	f_str(Obj, Str, _, _),
-	pli_print(Str, InIO, NextIO),
-	io_write('\n', NextIO, OutIO).
-pl_print([Obj|Objs], NewLine, InIO, OutIO) :-
+	pli_print(Str, Backtrack, InIO, NextIO),
+	io_write('\n', Backtrack, NextIO, OutIO).
+pl_print([Obj|Objs], NewLine, Backtrack, InIO, OutIO) :-
+	Objs \= [],
 	f_str(Obj, Str, _, _),
-	pli_print(Str, InIO, IO_0),
-	io_write(' ', IO_0, IO_1),
-	pl_print(Objs, NewLine, IO_1, OutIO).
+	pli_print(Str, Backtrack, InIO, IO_0),
+	io_write(' ', Backtrack, IO_0, IO_1),
+	pl_print(Objs, NewLine, Backtrack, IO_1, OutIO).
 
 pl_solve(pl_bool(1)).
 
@@ -179,6 +180,8 @@ fi_repr_list([Obj|Objs], Acc, Result) :-
 
 % io handling
 
-io_write(Str, InIO, OutIO) :-
+io_write(Str, 0, IO, IO) :- % write without backtrack
+	write(Str).
+io_write(Str, 1, InIO, OutIO) :- % write with backtrack
 	append(InIO, [Str], OutIO). % TODO: Appending like this is inefficient
 

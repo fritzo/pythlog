@@ -7,7 +7,7 @@ class FindGlobalSymbols(ast.NodeVisitor):
         self._symbols = set()
 
     def symbols(self):
-        return self._symbols.union(dir(__builtins__))
+        return self._symbols.union(dir(__builtins__) + ['nbout'])
 
     def visit_FunctionDef(self, node):
         self._symbols.add(node.name)
@@ -340,11 +340,15 @@ class StatementListCompiler(ast.NodeVisitor):
             self.visit(stmt)
         return self._out_stmts, self._out_predicates
 
-    def visit_Print(self, node):
+    def visit_Print(self, node):            
         expr = self._expr_visitor()
         values = ", ".join(expr.visit(v) for v in node.values)
         io0, io1 = self._io_manager.new_io_var_name()
-        self._add_stmt('pl_print([%s], %s, %s, %s)' % (values, int(node.nl), io0, io1))
+        if node.dest.__class__ == ast.Name and node.dest.id == 'nbout':
+            backtrack = 0
+        else:
+            backtrack = 1
+        self._add_stmt('pl_print([%s], %s, %s, %s, %s)' % (values, int(node.nl), backtrack, io0, io1))
 
     def visit_Expr(self, node):
         self._expr_visitor().visit(node.value)
