@@ -42,6 +42,12 @@ pl_eq(X, Y, pl_bool(0)) :-
 	X \= Y,
 	not(pl_int(_) = X).
 
+% TODO: Should only evaluate member once! How?
+pl_in(L, pl_seq(list, R), pl_bool(1)) :-
+	member(L, R).
+pl_in(L, pl_seq(list, R), pl_bool(0)) :-
+	not(member(L, R)).
+
 pl_gt(pl_int(L), pl_int(R), pl_bool(Z)) :-
 	Z #<==> (L #> R).
 

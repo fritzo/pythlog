@@ -587,7 +587,8 @@ def main():
 
     args = parser.parse_args()
     outfile = args.outfile
-    outfile.write(":- style_check(-singleton).\n\n")
+    outfile.write("\n:- style_check(-singleton).\n")
+    outfile.write(":- style_check(-discontiguous).\n\n")
     for f in args.infiles:
         outfile.write(compile_module(f.read()))
     outfile.close()

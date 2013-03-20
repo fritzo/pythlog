@@ -11,6 +11,11 @@ class MyClass:
 	def func_b(self, arg):
 		return self.field_b * arg
 
+class FooClass:
+	def __init__(self, a, b):
+		self._a = a
+		self._b = b
+
 
 def test_class_instantiate():
 	c = MyClass(10, "a")
@@ -35,3 +40,19 @@ def test_class_search_list_for_object():
 	l = [MyClass(1, 2), MyClass(2, 3), MyClass(4, 5), MyClass(5, 6)]
 	assert l[n].field_a * 2 == l[n].field_b + 1
 	assert str(n) == "1"
+
+def test_class_comparing_objects():
+	c0 = MyClass(1, 2)
+	c1 = MyClass(1, 2)
+	c2 = MyClass("1", 2)
+	assert c0 == c1
+	assert not c0 != c1
+	assert not c1 == c2
+
+def test_class_destructure_objects():
+	c = MyClass(FooClass(1, 2), FooClass("ab", 8))
+	assert c == MyClass(x, FooClass("a" + y, z + 7))
+	assert str(x) == "FooClass(1, 2)"
+	assert str(y) == "b"
+	assert str(z) == "1"
+

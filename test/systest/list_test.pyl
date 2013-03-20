@@ -30,6 +30,18 @@ def test_list_access_single_element_with_negative_index():
 	assert s[-1] == 2
 	assert s[-2] == 1
 
+def test_list_in_operator():
+	assert 1 in [1, 2]
+	assert 2 in [1, 2, 3]
+
+def test_list_solve_equation_with_in_operator():
+	assert len(l) == 2
+	assert 1 in l
+	assert 2 in l
+	assert l[0] == 2
+	assert str(l) == "[2, 1]"
+
+
 def test_list_solve_append_equation_with_mult_0():
 	assert [1, "a", "a", 3, "a"] == [1] + 2 * x + [3] + x
 	assert "['a']" == str(x)
