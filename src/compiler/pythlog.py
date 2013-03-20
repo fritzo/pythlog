@@ -158,12 +158,20 @@ class ExprVisitor(ast.NodeVisitor):
     def visit_Num(self, node):
         return "pl_int(%s)" % node.n
 
+    def visit_Set(self, node):
+        elems = ", ".join(self.visit(e) for e in node.elts)
+        result = self._new_temp_var()
+        io = self._io_manager.current_io_var_name()
+        self._stmts.append("f_set([%s], %s, %s, %s)" % (elems, result, io, io))
+        return result
+
     def visit_Dict(self, node):
         keys = [self.visit(k) for k in node.keys]
         values = [self.visit(v) for v in node.values]
         args = ", ".join("%s-%s" % (k, v) for k, v in zip(keys, values))
         result = self._new_temp_var()
-        self._stmts.append("f_dict([%s], %s)" % (args, result))
+        io = self._io_manager.current_io_var_name()
+        self._stmts.append("f_dict([%s], %s, %s, %s)" % (args, result, io, io))
         return result
 
     def visit_List(self, node):

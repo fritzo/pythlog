@@ -1,0 +1,77 @@
+# Note: pythlog implements sets with ordered lists. This implies that the non-
+# determinism of Python's implementaion is not reflected. Bug or feature?
+
+def test_set_length():
+	assert len({1, 1}) == 1
+	assert len(set()) == 0
+	assert len({1, 2, 3, 5}) == 4
+
+def test_set_equal():
+	assert set() == set()
+	assert not set() == {1}
+	assert {1, 1} == {1}
+	assert {1, 2} == {2, 1} 
+
+def test_set_not_equal():
+	assert set() != {1}
+	assert not {1} != {1}
+	assert not {1, 1} != {1}
+	assert not {1, 2, 2} != {2, 1} 
+	assert {1, 2, 3} != {2, 1} 
+
+def test_set_in_operator():
+	s = {"a", 1}
+	assert "a" in s
+	assert 1 in s
+	assert not 2 in s
+	assert not "b" in s
+
+def test_set_union():
+	s0 = {1, 2, 3}
+	s1 = {2, 3, 4}
+	assert s0.union(s1) == s1.union(s0)
+	assert s0.union(s1) == {1, 2, 3, 4}
+
+def test_set_intersection():
+	s0 = {1, 2, 3}
+	s1 = {2, 3, 4}
+	assert s0.intersection(s1) == s1.intersection(s0)
+	assert s0.intersection(s1) == {2, 3}
+
+def test_set_difference():
+	s0 = {1, 2, 3}
+	s1 = {2, 3, 4}
+	assert s0 - s1 == s0.difference(s1)
+	assert s0 - s1 == {1}
+
+def test_set_subset():
+	s0 = {1, 2}
+	s1 = {1, 2, 3}
+	assert s0.issubset(s1)
+	assert not s1.issubset(s0)
+
+def test_set_superset():
+	s0 = {1, 2}
+	s1 = {1, 2, 3}
+	assert s1.issuperset(s0)
+	assert not s0.issuperset(s1)
+
+def test_set_symmetric_difference():
+	s0 = {1, 2}
+	s1 = {2, 3}
+	assert s1.symmetric_difference(s0) == s0.symmetric_difference(s1)
+	assert s0.symmetric_difference(s1) == {1, 3}
+
+def test_set_isdisjoint():
+	s0 = {1, 2}
+	s1 = {2, 3}
+	assert not s1.isdisjoint(s0)
+	assert s0.isdisjoint({4, 5})
+
+def test_set_construct_using_in_operator():
+	s = free
+	assert type(s) == set
+	assert 1 in s
+	assert 2 in s
+	assert s == {1, 2}
+

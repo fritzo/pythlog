@@ -140,6 +140,8 @@ def test_string_stringify_free_list_variable_with_length_info():
 def test_string_stringify_free_list_variable_without_length_info():
 	l = free
 	assert type(l) == list
+	assert str(l) == "?list"
+	assert repr(l) == "?list"
 #	print len(l)
 
 
@@ -154,3 +156,15 @@ def test_string_stringify_dict_with_free_values():
 	d = {1:x, 2:y}
 	assert str(d) == "{1:?object, 2:?object}"
 	assert repr(d) == "{1:?object, 2:?object}"
+
+
+def test_string_stringify_free_set_variable():
+	d = free
+	assert type(d) == set
+	assert str(d) == "?set"
+	assert repr(d) == "?set"
+
+def test_string_stringify_set_variable():
+	d = {1, 2, 3}
+	assert str(d) == repr(d)
+	assert repr(d) == "{1, 2, 3}"

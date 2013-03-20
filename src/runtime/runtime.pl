@@ -1,4 +1,5 @@
 ?- use_module(library(clpfd)).
+?- use_module(library(ordsets)).
 
 pl_add(pl_int(L), pl_int(R), pl_int(Z)) :-
 	Z #= L + R.
@@ -37,6 +38,10 @@ pl_in(L, pl_seq(list, R), pl_bool(1)) :-
 	member(L, R).
 pl_in(L, pl_seq(list, R), pl_bool(0)) :-
 	not(member(L, R)).
+pl_in(L, pl_seq(set, R), pl_bool(1)) :-
+	ord_memberchk(L, R).
+pl_in(L, pl_seq(set, R), pl_bool(0)) :-
+	not(ord_memberchk(L, R)).
 pl_in(L, pl_seq(str, R), pl_bool(1)) :-
 	append(X, _, R), append(_, L, X).
 pl_in(pl_seq(str, L), pl_seq(str, R), pl_bool(Z)) :-
@@ -125,6 +130,8 @@ pl_print([Obj|Objs], NewLine, Backtrack, InIO, OutIO) :-
 	io_write(' ', Backtrack, IO_0, IO_1),
 	pl_print(Objs, NewLine, Backtrack, IO_1, OutIO).
 
+
+
 pl_subscript_wrap_elem(str, Z, pl_seq(str, [Z])).
 pl_subscript_wrap_elem(Type, Z, Z) :-
 	Type \= str.
@@ -144,22 +151,40 @@ pl_subscript(pl_seq(Type, L), pl_int(R), Elem) :-
 	pl_subscript_wrap_elem(Type, Z, Elem).
 
 
-
 pl_sub(pl_int(L), pl_int(R), pl_int(Z)) :-
 	Z #= L - R.
+pl_sub(L, R, Z) :-
+	f_difference(L, R, Z, _, _).
 
 
 % builtins
 
-f_dict(Elems, pl_seq(dict, Assoc)) :-
+f_dict(Elems, pl_seq(dict, Assoc), IO, IO) :-
 	list_to_assoc(Elems, Assoc).
+
+f_difference(pl_seq(set, L), pl_seq(set, R), pl_seq(set, Z), IO, IO) :-
+	ord_subtract(L, R, Z).
+
+f_intersection(pl_seq(set, OrdList0), pl_seq(set, OrdList1), pl_seq(set, OrdList), IO, IO) :-
+	ord_intersection(OrdList0, OrdList1, OrdList).
+
+f_isdisjoint(pl_seq(set, S0), pl_seq(set, S1), pl_bool(1), IO, IO) :-
+	ord_disjoint(S0, S1).
+f_isdisjoint(pl_seq(set, S0), pl_seq(set, S1), pl_bool(0), IO, IO) :-
+	not(ord_disjoint(S0, S1)).
+f_issubset(pl_seq(set, Sub), pl_seq(set, Sup), pl_bool(1), IO, IO) :-
+	ord_subset(Sub, Sup).
+f_issubset(pl_seq(set, Sub), pl_seq(set, Sup), pl_bool(0), IO, IO) :-
+	not(ord_subset(Sub, Sup)).
+f_issuperset(Sup, Sub, Z, IO, IO) :-
+	f_issubset(Sub, Sup, Z, _, _).
 
 f_keys(pl_seq(dict, Assoc), pl_seq(list, Keys), IO, IO) :-
 	assoc_to_keys(Assoc, Keys).
-f_len(pl_seq(list, List), pl_int(N), IO, IO) :-
+
+f_len(pl_seq(Type, List), pl_int(N), IO, IO) :-
+	Type \= dict,
 	length(List, N).
-f_len(pl_seq(str, Str), pl_int(N), IO, IO) :-
-	length(Str, N).
 f_len(pl_seq(dict, Assoc), pl_int(N), IO, IO) :-
 	assoc_to_list(Assoc, List),
 	length(List, N).
@@ -191,9 +216,17 @@ f_repr(pl_seq(str, Var), pl_seq(str, Str), IO, IO) :-
 	fi_str_non_ground(Var, Tmp0),
 	append("'", Tmp0, Tmp1),
 	append(Tmp1, "'", Str).
+f_repr(pl_seq(list, Var), pl_seq(str, "?list"), IO, IO) :-
+	var(Var).
 f_repr(pl_seq(list, L), pl_seq(str, Repr), IO, IO) :-
+	not(var(L)),
 	fi_repr_list(L, "[", Tmp),
 	append(Tmp, "]", Repr).
+f_repr(pl_seq(set, Var), pl_seq(str, "?set"), IO, IO) :-
+	var(Var).
+f_repr(pl_seq(set, L), pl_seq(str, Repr), IO, IO) :-
+	fi_repr_list(L, "{", Tmp),
+	append(Tmp, "}", Repr).
 f_repr(pl_int(I), pl_seq(str, Repr), IO, IO) :-
 	integer(I),
 	number_codes(I, Repr).
@@ -212,6 +245,10 @@ f_repr(pl_object(Type, Attrs), pl_seq(str, Result), IO, IO) :-
 	fi_repr_list(Attrs, T0, T1),
 	append(T1, ")", Result).
 
+f_set(Elems, pl_seq(set, OrdList), IO, IO) :-
+	list_to_ord_set(Elems, OrdList).
+f_set(pl_seq(set, []), IO, IO).
+
 f_str(Var, pl_seq(str, "?object"), IO, IO) :-
 	var(Var).
 f_str(pl_seq(dict, A), S, IO, IO) :-
@@ -228,6 +265,8 @@ f_str(pl_int(I), S, IO, IO) :-
 	f_repr(pl_int(I), S, _, _).
 f_str(pl_seq(list, L), S, IO, IO) :-
 	f_repr(pl_seq(list, L), S, _, _).
+f_str(pl_seq(set, L), S, IO, IO) :-
+	f_repr(pl_seq(set, L), S, _, _).
 f_str(pl_None, S, IO, IO) :-
 	f_repr(pl_None, S, _, _).
 f_str(pl_bool(Z), S, IO, IO) :-
@@ -235,12 +274,19 @@ f_str(pl_bool(Z), S, IO, IO) :-
 f_str(pl_object(Type, Attrs), pl_seq(str, Result), IO, IO) :-
 	f_repr(pl_object(Type, Attrs), pl_seq(str, Result), IO, IO).
 
+f_symmetric_difference(pl_seq(set, S0), pl_seq(set, S1), pl_seq(set, D), IO, IO) :-
+	ord_symdiff(S0, S1, D).
+
 f_type(pl_bool(_), f_bool, IO, IO).
 f_type(pl_int(_), f_int, IO, IO).
+f_type(pl_seq(set, _), f_set, IO, IO).
 f_type(pl_seq(list, _), f_list, IO, IO).
 f_type(pl_seq(str, _), f_str, IO, IO).
 f_type(pl_seq(dict, _), f_dict, IO, IO).
 f_type(pl_object(Type, _), Type, IO, IO).
+
+f_union(pl_seq(set, OrdList0), pl_seq(set, OrdList1), pl_seq(set, OrdList), IO, IO) :-
+	ord_union(OrdList0, OrdList1, OrdList).
 
 f_values(pl_seq(dict, Assoc), pl_seq(list, Values), IO, IO) :-
 	assoc_to_values(Assoc, Values).
