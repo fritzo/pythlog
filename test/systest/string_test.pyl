@@ -1,3 +1,5 @@
+# Note: have to put string into list to avoid verification-assert to help the
+# inference engine.
 
 
 def test_string_length():
@@ -31,6 +33,23 @@ def test_string_access_single_element_with_negative_index():
 	assert s[-1] == "d"
 	assert s[-2] == "l"
 
+def test_string_in_operator():
+	assert "l" in "hello"
+	assert "hel" in "hello"
+	assert "rl" in "world"
+	assert not "le" in "hello"
+	assert not "wl" in "world"
+
+def test_string_solve_equation_using_in_operator():
+	assert len(l) == 6
+	assert "ab" in l
+	assert "c" in l
+	assert "cd" in l
+	assert "de" in l
+	assert "ef" in l
+
+	assert str([l]) == "['abcdef']"
+
 def test_string_stringify_int():
 	assert str(1) == "1"
 	assert str(12093) == "12093"
@@ -42,19 +61,19 @@ def test_string_stringify_list():
 
 def test_string_solve_append_equation_with_mult_0():
 	assert "abbcb" == "a" + 2 * x + "c" + x
-	assert "b" == x
+	assert str([x]) == "['b']"
 
 def test_string_solve_append_equation_with_mult_1():
 	assert "abbcb" == "a" + n * "b" + "cb"
-	assert n == 2
+	assert str(n) == "2"
 
 def test_string_solve_subscript_equation():
 	assert "abbcb"[n] == "c"
-	assert n == 3
+	assert str(n) == "3"
 
 def test_string_construction_through_assertions():
 	assert len(s) == 3
 	assert s[0] == "a"
 	assert s[1] == s[2]
 	assert s[1] == "b"
-	assert s == "abb"
+	assert str([s]) == "['abb']"

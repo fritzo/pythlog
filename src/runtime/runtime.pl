@@ -47,6 +47,21 @@ pl_in(L, pl_seq(list, R), pl_bool(1)) :-
 	member(L, R).
 pl_in(L, pl_seq(list, R), pl_bool(0)) :-
 	not(member(L, R)).
+pl_in(L, pl_seq(str, R), pl_bool(1)) :-
+	append(X, _, R), append(_, L, X).
+pl_in(pl_seq(str, L), pl_seq(str, R), pl_bool(Z)) :-
+	pli_sublist(L, R, Z).
+
+pli_sublist(Short, Long, 1) :-
+    prefix(Short, Long).
+pli_sublist(Short, Long, Z) :-
+    not(prefix(Short, Long)),
+    [_|NextLong] = Long,
+    pli_sublist(Short, NextLong, Z).
+pli_sublist(Short, [], 0) :-
+    Short \= [].
+
+
 
 pl_gt(pl_int(L), pl_int(R), pl_bool(Z)) :-
 	Z #<==> (L #> R).
