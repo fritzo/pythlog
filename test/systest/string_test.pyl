@@ -42,6 +42,7 @@ def test_string_in_operator():
 
 def test_string_solve_equation_using_in_operator():
 	l = free
+	assert type(l) == str
 	assert len(l) == 6
 	assert "ab" in l
 	assert "c" in l
@@ -77,8 +78,79 @@ def test_string_solve_subscript_equation():
 
 def test_string_construction_through_assertions():
 	s = free
+	assert type(s) == str
 	assert len(s) == 3
 	assert s[0] == "a"
 	assert s[1] == s[2]
 	assert s[1] == "b"
 	assert str([s]) == "['abb']"
+
+def test_string_stringify_free_variable_with_no_type_info():
+	v = free
+	assert str(v) == "?object"
+	assert repr(v) == "?object"
+
+def test_string_stringify_free_int_variable():
+	i = free
+	assert type(i) == int
+	assert str(i) == "?int"
+	assert repr(i) == "?int"
+
+def test_string_stringify_free_bool_variable():
+	i = free
+	assert type(i) == bool
+	assert str(i) == "?bool"
+	assert repr(i) == "?bool"
+
+def test_string_stringify_free_string_varible_without_lenght_and_member_info():
+	s = free
+	assert type(s) == str
+	assert str(s) == "?str"
+	assert repr(s) == "?str"
+
+def test_string_stringify_free_string_varible_without_lenght_and_with_member_info():
+	s = free
+	assert type(s) == str
+	assert s[0] == "a"
+	assert s[2] == "c"
+	assert str(s) == "a?c..."
+	assert repr(s) == "'a?c...'"
+
+def test_string_stringify_free_string_variable_with_length_and_member_info():
+	t = free
+	assert type(t) == str
+	assert len(t) == 3
+	assert t[0] == "a"
+	assert t[2] == "c"
+	assert str(t) == "a?c"
+	assert repr(t) == "'a?c'"
+
+def test_string_stringify_free_list_variable_with_length_info():
+	l = free
+	assert type(l) == list
+	assert len(l) == 3
+	assert type(l[0]) == int
+	assert type(l[1]) == list
+	assert len(l[1]) == 1
+	assert type(l[2]) == str
+	assert str(l) == "[?int, [?object], ?str]"
+
+# TODO: This prints '0' because of how length/2 works. Need a better way of
+# dealing with strings of unknown length!
+def test_string_stringify_free_list_variable_without_length_info():
+	l = free
+	assert type(l) == list
+#	print len(l)
+
+
+def test_string_stringify_free_dict_variable():
+	d = free
+	assert type(d) == dict
+	assert str(d) == "?dict"
+	assert repr(d) == "?dict"
+
+def test_string_stringify_dict_with_free_values():
+	x, y = free
+	d = {1:x, 2:y}
+	assert str(d) == "{1:?object, 2:?object}"
+	assert repr(d) == "{1:?object, 2:?object}"

@@ -1,0 +1,67 @@
+# Python dicts are implemented as association list in Pythlog. Association
+# list are ordered which means that the non-determinism of Python dicts does
+# not exists in Pythlog. Bug or feature?
+
+def test_dict_length():
+	assert len({}) == 0
+	assert len({1:2}) == 1
+	assert len({1:2, 1:2, 2:3}) == 2
+
+def test_dict_equal():
+	assert {} == {}
+	assert {1:1} == {1:1}
+	assert {1:1, 1:2, 2:2} == {1:2, 2:2}
+	assert {1:2, 1:1, 2:2} == {1:1, 2:2}
+	assert not {1:1} == {}
+
+def test_dict_not_equal():
+	assert {1:1} != {}
+	assert {} != {2:2}
+	assert {1:1} != {1:1, 1:2}
+	assert not {} != {}
+	assert not {1:1} != {1:2, 1:1}
+
+def test_dict_read_element():
+	c = {1:2, "1":"2"}
+	assert c[1] == 2
+	assert c["1"] == "2"
+
+def test_dict_get_keys():
+	c = {"abc":1, 2:"def"}
+	assert c.keys() == [2, "abc"] # Associations list are ordered
+
+def test_dict_get_values():
+	c = {"abc":1, 2:"def"}
+	assert c.values() == ["def", 1] # Associations list are ordered
+
+def test_dict_in_operator():
+	c = {"a":1, "b":2}
+	assert "a" in c
+	assert "b" in c
+	assert not 1 in c
+
+def test_dict_to_string():
+	assert str({1:"a"}) == "{1:'a'}"
+	assert str({}) == "{}"
+
+def test_dict_free_variables_as_values():
+	x, y = free
+	c = {1:x, 2:y}
+	assert c[1] == 10
+	assert c[2] == 30
+	assert str(c) == "{1:10, 2:30}"
+
+
+class Foo:
+	def __init__(self, a, b):
+		self.a = a
+		self.b = b
+
+def test_dict_construct_values_from_asserts():
+	x, y, k = free
+	d = {1:x, 2:y}
+	assert x.a == y.b
+	assert x.b == y.a
+	assert x.a == 10
+	assert y.a == 20
+	assert str(d) == "{1:Foo(10, 20), 2:Foo(20, 10)}"

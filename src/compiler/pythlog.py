@@ -158,6 +158,14 @@ class ExprVisitor(ast.NodeVisitor):
     def visit_Num(self, node):
         return "pl_int(%s)" % node.n
 
+    def visit_Dict(self, node):
+        keys = [self.visit(k) for k in node.keys]
+        values = [self.visit(v) for v in node.values]
+        args = ", ".join("%s-%s" % (k, v) for k, v in zip(keys, values))
+        result = self._new_temp_var()
+        self._stmts.append("f_dict([%s], %s)" % (args, result))
+        return result
+
     def visit_List(self, node):
         elements = ", ".join(self.visit(e) for e in node.elts)
         return "pl_seq(list, [%s])" % elements
@@ -275,7 +283,7 @@ class ExprVisitor(ast.NodeVisitor):
     def visit_Call(self, node):
         if node.func.__class__ == ast.Attribute:
             return self.visit_MethodCall(node)
-        func_args = [self.visit(a) for a in node.args]
+        func_args = [not_none(self.visit(a), a) for a in node.args]
         func = self.visit(node.func)
         result = self._new_temp_var()
         io0, io1 = self._io_manager.new_io_var_name()
@@ -283,6 +291,9 @@ class ExprVisitor(ast.NodeVisitor):
         self._stmts.append("%s(%s)" % (func, ", ".join(call_args)))
         return result
 
+def not_none(obj, node):
+    assert obj is not None, ast.dump(node)
+    return obj
 
 class ReturnStmtVisitor(ast.NodeVisitor):
     def __init__(self):
