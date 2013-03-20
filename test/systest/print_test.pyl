@@ -3,6 +3,7 @@
 # This test verifies that normal printing is not performed if control
 # backtracks.
 def test_print_dont_output_on_backtrack():
+	x = free
 	assert x > 0 and x < 4
 	if x == 1:
 		print 100 * "************** This should not be printed **************"

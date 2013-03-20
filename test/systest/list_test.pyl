@@ -35,6 +35,7 @@ def test_list_in_operator():
 	assert 2 in [1, 2, 3]
 
 def test_list_solve_equation_with_in_operator():
+	l = free
 	assert len(l) == 2
 	assert 1 in l
 	assert 2 in l
@@ -43,18 +44,22 @@ def test_list_solve_equation_with_in_operator():
 
 
 def test_list_solve_append_equation_with_mult_0():
+	x = free
 	assert [1, "a", "a", 3, "a"] == [1] + 2 * x + [3] + x
 	assert "['a']" == str(x)
 
 def test_list_solve_append_equation_with_mult_1():
+	n = free
 	assert [0, 1, 1, 2] == [0] + n * [1] + [2]
 	assert str(n) == "2"
 
 def test_list_solve_subscript_equation():
+	n = free
 	assert [1, 2, 3, 4][n] == 3
 	assert str(n) == "2"
 
 def test_list_construction_through_assertions():
+	s = free
 	assert len(s) == 4
 	assert s[0] == 1
 	assert s[1] == []

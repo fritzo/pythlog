@@ -27,16 +27,19 @@ def test_class_call_method_on_object():
 	assert 20 == c.func_a(2)
 
 def test_class_construct_object_from_asserts_on_fields():
+	c = free
 	assert c.field_a == 10
 	assert c.field_b == 20
 	assert str(c) == "MyClass(10, 20)"
 
 def test_class_construct_object_from_asserts_on_method():
+	c = free
 	assert c.func_a(4) == 12
 	assert c.func_b(3) == -18
 	assert str(c) == "MyClass(3, -6)"
 
 def test_class_search_list_for_object():
+	n = free
 	l = [MyClass(1, 2), MyClass(2, 3), MyClass(4, 5), MyClass(5, 6)]
 	assert l[n].field_a * 2 == l[n].field_b + 1
 	assert str(n) == "1"
@@ -50,9 +53,19 @@ def test_class_comparing_objects():
 	assert not c1 == c2
 
 def test_class_destructure_objects():
+	x, y, z = free
 	c = MyClass(FooClass(1, 2), FooClass("ab", 8))
 	assert c == MyClass(x, FooClass("a" + y, z + 7))
 	assert str(x) == "FooClass(1, 2)"
 	assert str(y) == "b"
 	assert str(z) == "1"
 
+def test_class_instantiate_with_free_variables():
+	x, y = free
+	done = 0
+	c = MyClass(x, y)
+	if c == MyClass(10, 20):
+		assert str(x) == "10"
+		assert str(y) == "20"
+		done = 1
+	assert str(done) == '1'

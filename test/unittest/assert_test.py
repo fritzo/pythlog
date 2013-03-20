@@ -11,13 +11,13 @@ def f(a, b):
 
 class AssertTest(unittest.TestCase):
 	def test_assert_without_message(self):
-		self.assertEquals(['pl_assert(pl_int(1), pl_None, InIO, IO1)'],
+		self.assertEquals(['pl_assert(pl_int(1))'],
 			              compile_stmt("assert 1"))
-		self.assertEquals(['pl_assert(pl_bool(1), pl_None, InIO, IO1)'],
+		self.assertEquals(['pl_assert(pl_bool(1))'],
 			              compile_stmt("assert True"))
-		self.assertEquals(['pl_assert(pl_bool(0), pl_None, InIO, IO1)'],
+		self.assertEquals(['pl_assert(pl_bool(0))'],
 			              compile_stmt("assert False"))
 
 	def test_assert_with_message(self):
-		self.assertEquals(['pl_assert(pl_int(1), pl_seq(str, "msg"), InIO, IO1)'],
+		self.assertEquals(['pl_assert(pl_int(1))'],
 			              compile_stmt("assert 1, 'msg'"))

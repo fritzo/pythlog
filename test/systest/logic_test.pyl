@@ -21,3 +21,10 @@ def test_logic_and():
 	assert True and True
 	assert 1 and 1
 	assert not (True and 0)
+
+def test_logic_solve_equation():
+	x, y = free
+	assert not(x and y)
+	assert not y
+	assert str(x) == "True"
+	assert str(y) == "False"

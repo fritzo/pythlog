@@ -7,7 +7,7 @@ class FindGlobalSymbols(ast.NodeVisitor):
         self._symbols = set()
 
     def symbols(self):
-        return self._symbols.union(dir(__builtins__) + ['nbout'])
+        return self._symbols.union(dir(__builtins__))
 
     def visit_FunctionDef(self, node):
         self._symbols.add(node.name)
@@ -111,7 +111,7 @@ def new_value_for_var(varname, local_vars):
 class ExprVisitor(ast.NodeVisitor):
     def __init__(self, local_vars, temp_vars, stmts, global_symbols,
                  name_allocator, out_predicates, attrs_writable,
-                 io_manager, free_vars):
+                 io_manager):
         self._local_vars = local_vars
         self._temp_vars = temp_vars
         self._stmts = stmts
@@ -120,9 +120,7 @@ class ExprVisitor(ast.NodeVisitor):
         self._out_predicates = out_predicates
         self._attrs_writable = attrs_writable
         self._io_manager = io_manager
-        self._free_vars = free_vars # Whether or not free variables are allowed
-        self._free_vars_used = False
-
+ 
     def _expr_builder(self, stmts):
         return ExprVisitor(self._local_vars,
                             self._temp_vars,
@@ -131,12 +129,7 @@ class ExprVisitor(ast.NodeVisitor):
                             self._name_allocator,
                             self._out_predicates,
                             self._attrs_writable,
-                            self._io_manager,
-                            self._free_vars)
-
-
-    def free_vars_used(self):
-        return self._free_vars_used
+                            self._io_manager)
 
     def _new_var(self, varname):
         return new_value_for_var(varname, self._local_vars)
@@ -157,9 +150,6 @@ class ExprVisitor(ast.NodeVisitor):
             return self._local_vars[node.id]
         elif node.id in self._global_symbols:
             return "f_%s" % node.id # TODO: name mangling should not be done here
-        elif self._free_vars:
-            self._free_vars_used = True
-            return self._new_var(node.id)
         assert False, node.id
 
     def visit_Str(self, node):
@@ -321,7 +311,7 @@ class StatementListCompiler(ast.NodeVisitor):
         self._out_predicates = []
         self._io_manager = IoManager()
 
-    def _expr_visitor(self, free_vars=False):
+    def _expr_visitor(self):
         return ExprVisitor(self._local_vars,
                            self._temp_vars,
                            self._out_stmts,
@@ -329,8 +319,7 @@ class StatementListCompiler(ast.NodeVisitor):
                            self._name_allocator,
                            self._out_predicates,
                            self._attrs_writable,
-                           self._io_manager,
-                           free_vars)
+                           self._io_manager)
 
     def _add_stmt(self, stmt):
         self._out_stmts.append(stmt)
@@ -354,21 +343,25 @@ class StatementListCompiler(ast.NodeVisitor):
         self._expr_visitor().visit(node.value)
 
     def visit_Assert(self, node):
-        expr_visitor = self._expr_visitor(free_vars=True)
+        expr_visitor = self._expr_visitor()
         expr = expr_visitor.visit(node.test)
         assert expr is not None, ast.dump(node)
-        if node.msg is not None:
-            msg = self._expr_visitor().visit(node.msg)
+        self._add_stmt("pl_assert(%s)" % expr)
+
+    def visit_FreeDecl(self, node):
+        if node.targets[0].__class__ == ast.Tuple:
+            free_vars = node.targets[0].elts
         else:
-            msg = "pl_None"
-        if expr_visitor.free_vars_used():
-            self._add_stmt("pl_solve(%s)" % expr)
-        else:
-            io0, io1 = self._io_manager.new_io_var_name()
-            self._add_stmt("pl_assert(%s, %s, %s, %s)" % (expr, msg, io0, io1))
+            assert node.targets[0].__class__ == ast.Name
+            free_vars = [node.targets[0]]
+        for target in free_vars:
+            assert target.__class__ == ast.Name, ast.dump(node)
+            new_value_for_var(target.id, self._local_vars)
 
     def visit_Assign(self, node):
         assert len(node.targets) == 1
+        if node.value.__class__ == ast.Name and node.value.id == 'free':
+            return self.visit_FreeDecl(node)
         expr = self._expr_visitor()
         src = expr.visit(node.value)
         dst = expr.visit(node.targets[0])

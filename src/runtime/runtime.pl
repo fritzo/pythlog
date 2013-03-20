@@ -14,16 +14,8 @@ pl_and(L, R, pl_bool(Z)) :-
 	pl_bool(R, pl_bool(BR)),
 	pli_and(BL, BR, Z).
 
-pli_assert(pl_bool(1), _, IO, IO).
-pli_assert(pl_bool(0), _Msg, IO, IO) :-
-% TODO: How is text printed ONLY when the assert actually will fail?
-% That is, when backtracking wont help?
-%	io_write('AssertionError: ', InIO, NextIO),
-%	pl_print([Msg], 1, NextIO, OutIO),
-	fail.
-pl_assert(Obj, Msg, InIO, OutIO) :-
-	pl_bool(Obj, Bool),
-	pli_assert(Bool, Msg, InIO, OutIO).
+pl_assert(Obj) :-
+	pl_bool(Obj, pl_bool(1)).
 
 
 pl_bool(pl_bool(B), pl_bool(B)).
@@ -42,7 +34,7 @@ pl_eq(X, Y, pl_bool(0)) :-
 	X \= Y,
 	not(pl_int(_) = X).
 
-% TODO: Should only evaluate member once! How?
+% TODO: Should only evaluate 'member' once! How?
 pl_in(L, pl_seq(list, R), pl_bool(1)) :-
 	member(L, R).
 pl_in(L, pl_seq(list, R), pl_bool(0)) :-
@@ -52,6 +44,7 @@ pl_in(L, pl_seq(str, R), pl_bool(1)) :-
 pl_in(pl_seq(str, L), pl_seq(str, R), pl_bool(Z)) :-
 	pli_sublist(L, R, Z).
 
+% TODO: Should only evaluate 'prefix' once! How?
 pli_sublist(Short, Long, 1) :-
     prefix(Short, Long).
 pli_sublist(Short, Long, Z) :-
@@ -129,8 +122,6 @@ pl_print([Obj|Objs], NewLine, Backtrack, InIO, OutIO) :-
 	io_write(' ', Backtrack, IO_0, IO_1),
 	pl_print(Objs, NewLine, Backtrack, IO_1, OutIO).
 
-pl_solve(pl_bool(1)).
-
 pl_subscript_wrap_elem(str, Z, pl_seq(str, [Z])).
 pl_subscript_wrap_elem(Type, Z, Z) :-
 	Type \= str.
@@ -168,16 +159,20 @@ f_repr(pl_int(I), pl_seq(str, S), IO, IO) :-
 	integer(I),
 	number_codes(I, S).
 f_repr(pl_None, pl_seq(str, "None"), IO, IO).
+f_repr(pl_bool(1), pl_seq(str, "True"), IO, IO).
+f_repr(pl_bool(0), pl_seq(str, "False"), IO, IO).
 
 f_str(pl_seq(str, S), pl_seq(str, S), IO, IO).
 f_str(pl_int(I), S, IO, IO) :-
 	f_repr(pl_int(I), S, _, _).
 f_str(pl_seq(list, L), S, IO, IO) :-
 	f_repr(pl_seq(list, L), S, _, _).
-f_str(pl_int(I), pl_seq(str, "?free"), IO, IO) :-
+f_str(pl_int(I), pl_seq(str, "?int"), IO, IO) :-
 	var(I).
 f_str(pl_None, S, IO, IO) :-
 	f_repr(pl_None, S, _, _).
+f_str(pl_bool(Z), S, IO, IO) :-
+	f_repr(pl_bool(Z), S, IO, IO).
 f_str(pl_object(Type, Attrs), pl_seq(str, Result), IO, IO) :-
 	name(Type, InternalName),
 	length(StrPrefix, 2),

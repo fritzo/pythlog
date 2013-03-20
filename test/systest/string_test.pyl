@@ -41,6 +41,7 @@ def test_string_in_operator():
 	assert not "wl" in "world"
 
 def test_string_solve_equation_using_in_operator():
+	l = free
 	assert len(l) == 6
 	assert "ab" in l
 	assert "c" in l
@@ -60,18 +61,22 @@ def test_string_stringify_list():
 	#assert str(["a"]) == "['a']"
 
 def test_string_solve_append_equation_with_mult_0():
+	x = free
 	assert "abbcb" == "a" + 2 * x + "c" + x
 	assert str([x]) == "['b']"
 
 def test_string_solve_append_equation_with_mult_1():
+	n = free
 	assert "abbcb" == "a" + n * "b" + "cb"
 	assert str(n) == "2"
 
 def test_string_solve_subscript_equation():
+	n = free
 	assert "abbcb"[n] == "c"
 	assert str(n) == "3"
 
 def test_string_construction_through_assertions():
+	s = free
 	assert len(s) == 3
 	assert s[0] == "a"
 	assert s[1] == s[2]

@@ -1,29 +1,36 @@
 
 def test_solve_add_equation():
+	x = free
 	assert 1 == 60 + x
 	assert str(x) == "-59"
 
 def test_solve_sub_equation():
+	x = free
 	assert 1 == 60 - x
 	assert str(x) == "59"
 
 def test_solve_mul_equation():
+	x = free
 	assert 60 == 6 * x
 	assert str(x) == "10"
 
 def test_solve_div_equation():
+	x = free
 	assert 10 == 60 / x
 	assert str(x) ==  "6"
 
 def test_solve_mod_equation():
+	x = free
 	assert 1 == 60 % x
 	assert x == 59 # TODO: how to force solve?
 
 def test_solve_exp_equation():
+	x = free
 	assert 82995965928 == 4362 ** x
 	assert x == 3 # TODO: how to force solve?
 
 def test_solve_exp_equation():
+	x = free
 	assert 582622237229761 == x ** 12
 	assert x == 17 # TODO: how to force solve?
 
@@ -36,10 +43,12 @@ def alternatives(x):
 	return r
 
 def test_solve_cond_equation_0():
+	x = free
 	assert alternatives(x) == 10
 	assert str(x) == "0"
 
 def test_solve_cond_equation_1():
+	x = free
 	assert 20 == alternatives(x)
 	assert str(x) == "1"
 
@@ -53,5 +62,6 @@ def fac(n):
 	return c
 
 def test_solve_fac_equation():
+	x = free
 	assert 1307674368000 == fac(x)
 	assert str(x) == "15"
