@@ -2,7 +2,7 @@
 
 import ast
 
-pythlog_builtlins = "findall".split()
+pythlog_builtlins = "findall subsumes".split()
 class FindGlobalSymbols(ast.NodeVisitor):
     def __init__(self):
         self._symbols = set()

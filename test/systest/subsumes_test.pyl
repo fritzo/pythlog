@@ -1,0 +1,53 @@
+
+def test_subsumes_variable_subsumes_everything():
+	x = free
+	assert subsumes(x, 1)
+	assert subsumes(x, [])
+	assert subsumes(x, {})
+	assert subsumes(x, set())
+
+def test_subsumes_integer():
+	x, y , z, w, v = free
+	assert x > 0 and x < 10
+	assert y > 1 and y < 9
+	assert z > 1 and z < 4
+	assert w > -1 and w < 9
+	assert type(v) == int
+
+	assert subsumes(1, 1)
+	assert subsumes(v, 1)
+	assert subsumes(x, y)
+	assert subsumes(x, z)
+	assert subsumes(w, z)
+	assert not subsumes(x, w)
+
+def test_subsumes_list():
+	a, b, c = free
+	assert type(c) == list
+	assert subsumes([a, 2], [1, 2])
+	assert not subsumes([a, 2, 3], [1, 2])
+	assert subsumes([1, 2], [1, 2])
+	assert subsumes(c, [a, b])
+
+def test_subsumes_string():
+	s = free
+	assert type(s) == str
+	assert len(s) == 3
+	assert s[0] == "a"
+
+	assert subsumes(s, "abc")
+	assert not subsumes(s, "bcd")
+	assert not subsumes(s, "abcd")
+
+class Foo:
+	def __init__(self, a, b):
+		self.a = a
+		self.b = b
+
+def test_subsumes_object():
+	a, b = free
+	o0 = Foo(a, 1)
+	o1 = Foo(a, b)
+	assert subsumes(o0, Foo(2, 1))
+	assert not subsumes(o0, Foo(2, 2))
+	assert subsumes(o1, o0)

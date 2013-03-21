@@ -359,6 +359,42 @@ fi_str_non_ground([Val|L], [Char|R]) :-
 	fi_str_non_ground(L, R).
 fi_str_non_ground([], []).
 
+fi_subsumes_int_result(Z, 1) :- Z == 1.
+fi_subsumes_int_result(Z, 0) :- Z \== 1.
+fi_subsumes_list(0, _, _, 0).
+fi_subsumes_list(1, [], [], 1).
+fi_subsumes_list(1, [H0|T0], [H1|T1], Result) :-
+	f_subsumes(H0, H1, pl_bool(KeepGoing), _, _),
+	fi_subsumes_list(KeepGoing, T0, T1, Result).
+fi_subsumes_str_compare(H0, H1, 1) :-
+	unifiable(H0, H1, _).
+fi_subsumes_str_compare(H0, H1, 0) :-
+	not(unifiable(H0, H1, _)).
+fi_subsumes_str(0, _, _, 0).
+fi_subsumes_str(1, [], [], 1).
+fi_subsumes_str(1, [H0|T0], [H1|T1], Result) :-
+	fi_subsumes_str_compare(H0, H1, KeepGoing),
+	fi_subsumes_str(KeepGoing, T0, T1, Result).
+f_subsumes(Var, _, pl_bool(1), IO, IO) :-
+	var(Var).
+f_subsumes(pl_int(Greater), pl_int(Lesser), pl_bool(Result), IO, IO) :-
+	fd_dom(Greater, Dom), OneOrZero #<==> (Lesser in Dom),
+	fi_subsumes_int_result(OneOrZero, Result).
+f_subsumes(pl_seq(list, List0), pl_seq(list, List1), pl_bool(Result), IO, IO) :-
+	length(List0, N), length(List1, N),
+	fi_subsumes_list(1, List0, List1, Result).
+f_subsumes(pl_seq(list, List0), pl_seq(list, List1), pl_bool(0), IO, IO) :-
+	length(List0, N0), length(List1, N1), N0 \= N1.
+f_subsumes(pl_seq(str, Str0), pl_seq(str, Str1), pl_bool(Result), IO, IO) :-
+	length(Str0, N), length(Str1, N),
+	fi_subsumes_str(1, Str0, Str1, Result).
+f_subsumes(pl_seq(str, Str0), pl_seq(str, Str1), pl_bool(0), IO, IO) :-
+	length(Str0, N0), length(Str1, N1), N0 \= N1.
+f_subsumes(pl_object(T, Attrs0), pl_object(T, Attrs1), pl_bool(Result), IO, IO) :-
+	fi_subsumes_list(1, Attrs0, Attrs1, Result).
+	
+
+
 % io handling
 
 io_write(Str, 0, IO, IO) :- % write without backtrack
