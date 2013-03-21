@@ -48,9 +48,9 @@ pl_in(L, pl_seq(str, R), pl_bool(1)) :-
 pl_in(pl_seq(str, L), pl_seq(str, R), pl_bool(Z)) :-
 	pli_sublist(L, R, Z).
 % TODO: Should only evaluate 'get_assoc' once! How?
-pl_in(Elem, pl_seq(dict, Assoc), pl_bool(1)) :-
+pl_in(Elem, pl_dict(Assoc), pl_bool(1)) :-
 	get_assoc(Elem, Assoc, _).
-pl_in(Elem, pl_seq(dict, Assoc), pl_bool(0)) :-
+pl_in(Elem, pl_dict(Assoc), pl_bool(0)) :-
 	not(get_assoc(Elem, Assoc, _)).
 
 % TODO: Should only evaluate 'prefix' once! How?
@@ -105,6 +105,8 @@ pl_noteq(pl_int(L), pl_int(R), pl_bool(Z)) :-
 pl_noteq(X, X, pl_bool(0)).
 pl_noteq(pl_seq(Type, L), pl_seq(Type, R), pl_bool(1)) :-
 	L \== R.
+pl_noteq(pl_dict(L), pl_dict(R), pl_bool(1)) :-
+	L \== R.
 
 pl_or(L, R, pl_bool(Z)) :-
 	pl_bool(L, pl_bool(BL)),
@@ -136,10 +138,10 @@ pl_print([Obj|Objs], NewLine, Backtrack, InIO, OutIO) :-
 pl_subscript_wrap_elem(str, Z, pl_seq(str, [Z])).
 pl_subscript_wrap_elem(Type, Z, Z) :-
 	Type \= str.
-pl_subscript(pl_seq(dict, Assoc), Key, Value) :-
+pl_subscript(pl_dict(Assoc), Key, Value) :-
 	ground(Key),
 	get_assoc(Key, Assoc, Value).
-pl_subscript(pl_seq(dict, Assoc), Key, Value) :-
+pl_subscript(pl_dict(Assoc), Key, Value) :-
 	not(ground(Key)),
 	assoc_to_list(Assoc, KeyValueList),
 	member(Key-Value, KeyValueList).
@@ -165,7 +167,7 @@ pl_sub(L, R, Z) :-
 
 % builtins
 
-f_dict(Elems, pl_seq(dict, Assoc), IO, IO) :-
+f_dict(Elems, pl_dict(Assoc), IO, IO) :-
 	list_to_assoc(Elems, Assoc).
 
 f_endswith(pl_seq(str, Str), pl_seq(str, Suffix), pl_bool(1), IO, IO) :-
@@ -204,13 +206,13 @@ f_issuperset(Sup, Sub, Z, IO, IO) :-
 f_join(pl_seq(str, Sep), pl_seq(list, Strs), pl_seq(str, Result), IO, IO) :-
 	fi_join(Sep, Strs, "", Result).
 
-f_keys(pl_seq(dict, Assoc), pl_seq(list, Keys), IO, IO) :-
+f_keys(pl_dict(Assoc), pl_seq(list, Keys), IO, IO) :-
 	assoc_to_keys(Assoc, Keys).
 
 f_len(pl_seq(Type, List), pl_int(N), IO, IO) :-
 	Type \= dict,
 	length(List, N).
-f_len(pl_seq(dict, Assoc), pl_int(N), IO, IO) :-
+f_len(pl_dict(Assoc), pl_int(N), IO, IO) :-
 	assoc_to_list(Assoc, List),
 	length(List, N).
 
@@ -222,9 +224,9 @@ f_repr(Key-Value, pl_seq(str, Repr), IO, IO) :-
 	f_repr(Value, pl_seq(str, ValueRepr), _, _),
 	append(KeyRepr, ":", Tmp),
 	append(Tmp, ValueRepr, Repr).
-f_repr(pl_seq(dict, Assoc), pl_seq(str, "?dict"), IO, IO) :-
+f_repr(pl_dict(Assoc), pl_seq(str, "?dict"), IO, IO) :-
 	var(Assoc).
-f_repr(pl_seq(dict, Assoc), pl_seq(str, Repr), IO, IO) :-
+f_repr(pl_dict(Assoc), pl_seq(str, Repr), IO, IO) :-
 	not(var(Assoc)),
 	assoc_to_list(Assoc, KeyValueList),
 	fi_repr_list(KeyValueList, "{", Tmp),
@@ -281,8 +283,8 @@ f_startswith(pl_seq(str, Str), pl_seq(str, Prefix), pl_bool(0), IO, IO) :-
 
 f_str(Var, pl_seq(str, "?object"), IO, IO) :-
 	var(Var).
-f_str(pl_seq(dict, A), S, IO, IO) :-
-	f_repr(pl_seq(dict, A), S, _, _).
+f_str(pl_dict(A), S, IO, IO) :-
+	f_repr(pl_dict(A), S, _, _).
 f_str(pl_seq(str, S), pl_seq(str, S), IO, IO) :-
 	ground(S).
 f_str(pl_seq(str, Var), pl_seq(str, "?str"), IO, IO) :-
@@ -312,13 +314,13 @@ f_type(pl_int(_), f_int, IO, IO).
 f_type(pl_seq(set, _), f_set, IO, IO).
 f_type(pl_seq(list, _), f_list, IO, IO).
 f_type(pl_seq(str, _), f_str, IO, IO).
-f_type(pl_seq(dict, _), f_dict, IO, IO).
+f_type(pl_dict(_), f_dict, IO, IO).
 f_type(pl_object(Type, _), Type, IO, IO).
 
 f_union(pl_seq(set, OrdList0), pl_seq(set, OrdList1), pl_seq(set, OrdList), IO, IO) :-
 	ord_union(OrdList0, OrdList1, OrdList).
 
-f_values(pl_seq(dict, Assoc), pl_seq(list, Values), IO, IO) :-
+f_values(pl_dict(Assoc), pl_seq(list, Values), IO, IO) :-
 	assoc_to_values(Assoc, Values).
 
 

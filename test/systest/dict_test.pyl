@@ -77,13 +77,3 @@ def test_dict_construct_values_from_asserts():
 	assert x.a == 10
 	assert y.a == 20
 	assert str(d) == "{1:Foo(10, 20), 2:Foo(20, 10)}"
-
-def t_est_dict_integer_range_as_keys():
-	x, y, z = free
-	assert x < 0
-	assert y > 1
-	assert z >= 0 and z <= 1
-
-	d = {x:"x", y:"y", z:"z"}
-	print d[-1]
-#	print d
