@@ -19,20 +19,25 @@ def test_solve_div_equation():
 	assert 10 == 60 / x
 	assert str(x) ==  "6"
 
+# TODO: would be nice if these three equations didn't need findall for
+# solving.
 def test_solve_mod_equation():
 	x = free
+	assert x > 0 and x <  1000 # TODO: have static inference engine for these things
 	assert 1 == 60 % x
-	assert x == 59 # TODO: how to force solve?
+	assert findall(x)[0] == 59
 
 def test_solve_exp_equation():
 	x = free
+	assert x > 0 and x <  1000 # TODO: have static inference engine for these things
 	assert 82995965928 == 4362 ** x
-	assert x == 3 # TODO: how to force solve?
+	assert findall(x)[0] == 3
 
 def test_solve_exp_equation():
 	x = free
+	assert x > 0 and x <  1000 # TODO: have static inference engine for these things
 	assert 582622237229761 == x ** 12
-	assert x == 17 # TODO: how to force solve?
+	assert findall(x) == 17
 
 def alternatives(x):
  	r = 0

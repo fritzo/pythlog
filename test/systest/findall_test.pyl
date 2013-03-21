@@ -1,0 +1,6 @@
+
+def test_findall_values_for_integer_equation():
+	x = free
+	assert x > 0
+	assert x < 4
+	assert findall(x) == [1, 2, 3]

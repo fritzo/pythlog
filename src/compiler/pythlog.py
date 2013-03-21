@@ -2,12 +2,13 @@
 
 import ast
 
+pythlog_builtlins = "findall".split()
 class FindGlobalSymbols(ast.NodeVisitor):
     def __init__(self):
         self._symbols = set()
 
     def symbols(self):
-        return self._symbols.union(dir(__builtins__))
+        return set(list(self._symbols) + dir(__builtins__) + pythlog_builtlins)
 
     def visit_FunctionDef(self, node):
         self._symbols.add(node.name)

@@ -38,6 +38,7 @@ pl_in(L, pl_seq(list, R), pl_bool(1)) :-
 	member(L, R).
 pl_in(L, pl_seq(list, R), pl_bool(0)) :-
 	not(member(L, R)).
+% TODO: Should only evaluate 'ord_member' once! How?
 pl_in(L, pl_seq(set, R), pl_bool(1)) :-
 	ord_memberchk(L, R).
 pl_in(L, pl_seq(set, R), pl_bool(0)) :-
@@ -164,6 +165,11 @@ f_dict(Elems, pl_seq(dict, Assoc), IO, IO) :-
 
 f_difference(pl_seq(set, L), pl_seq(set, R), pl_seq(set, Z), IO, IO) :-
 	ord_subtract(L, R, Z).
+
+f_findall(pl_int(Var), pl_seq(list, Solutions), IO, IO) :-
+	findall(pl_int(Solution),
+		    (label([Var]), Var = Solution),
+		    Solutions).
 
 f_intersection(pl_seq(set, OrdList0), pl_seq(set, OrdList1), pl_seq(set, OrdList), IO, IO) :-
 	ord_intersection(OrdList0, OrdList1, OrdList).
