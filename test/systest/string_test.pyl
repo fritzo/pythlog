@@ -33,6 +33,34 @@ def test_string_access_single_element_with_negative_index():
 	assert s[-1] == "d"
 	assert s[-2] == "l"
 
+def test_string_startswith():
+	assert "".startswith("")
+	assert "1".startswith("")
+	assert "1".startswith("1")
+	assert "abc".startswith("ab")
+	assert not "1".startswith("2")
+	assert not "12".startswith("2")
+
+def test_string_endswith():
+	assert "".endswith("")
+	assert "1".endswith("")
+	assert "1".endswith("1")
+	assert "abc".endswith("bc")
+	assert not "1".endswith("2")
+	assert not "12".endswith("1")
+
+def test_string_solve_with_startswith_endswith_and_in_operator():
+	s = free
+	assert s.startswith("ab")
+	assert s.endswith("e")
+	assert "cd" in s
+	assert len(s) == 5
+	assert str([s]) == "['abcde']"
+
+def test_string_join():
+	assert ", ".join(['a']) == "a"
+	assert ", ".join(['ab', 'bc', 'cd']) == "ab, bc, cd"
+
 def test_string_in_operator():
 	assert "l" in "hello"
 	assert "hel" in "hello"

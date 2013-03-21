@@ -168,6 +168,11 @@ pl_sub(L, R, Z) :-
 f_dict(Elems, pl_seq(dict, Assoc), IO, IO) :-
 	list_to_assoc(Elems, Assoc).
 
+f_endswith(pl_seq(str, Str), pl_seq(str, Suffix), pl_bool(1), IO, IO) :-
+	append(_, Suffix, Str).
+f_endswith(pl_seq(str, Str), pl_seq(str, Suffix), pl_bool(0), IO, IO) :-
+	not(append(_, Suffix, Str)).
+
 f_difference(pl_seq(set, L), pl_seq(set, R), pl_seq(set, Z), IO, IO) :-
 	ord_subtract(L, R, Z).
 
@@ -195,6 +200,9 @@ f_issubset(pl_seq(set, Sub), pl_seq(set, Sup), pl_bool(0), IO, IO) :-
 	not(ord_subset(Sub, Sup)).
 f_issuperset(Sup, Sub, Z, IO, IO) :-
 	f_issubset(Sub, Sup, Z, _, _).
+
+f_join(pl_seq(str, Sep), pl_seq(list, Strs), pl_seq(str, Result), IO, IO) :-
+	fi_join(Sep, Strs, "", Result).
 
 f_keys(pl_seq(dict, Assoc), pl_seq(list, Keys), IO, IO) :-
 	assoc_to_keys(Assoc, Keys).
@@ -266,6 +274,11 @@ f_set(Elems, pl_seq(set, OrdList), IO, IO) :-
 	list_to_ord_set(Elems, OrdList).
 f_set(pl_seq(set, []), IO, IO).
 
+f_startswith(pl_seq(str, Str), pl_seq(str, Prefix), pl_bool(1), IO, IO) :-
+	prefix(Prefix, Str).
+f_startswith(pl_seq(str, Str), pl_seq(str, Prefix), pl_bool(0), IO, IO) :-
+	not(prefix(Prefix, Str)).
+
 f_str(Var, pl_seq(str, "?object"), IO, IO) :-
 	var(Var).
 f_str(pl_seq(dict, A), S, IO, IO) :-
@@ -308,6 +321,14 @@ f_union(pl_seq(set, OrdList0), pl_seq(set, OrdList1), pl_seq(set, OrdList), IO, 
 f_values(pl_seq(dict, Assoc), pl_seq(list, Values), IO, IO) :-
 	assoc_to_values(Assoc, Values).
 
+
+fi_join(_Sep, [], Acc, Acc).
+fi_join(_Sep, [pl_seq(str, S)], Acc, Result) :-
+	append(Acc, S, Result).
+fi_join(Sep, [pl_seq(str, S)|Rest], Acc, Result) :-
+	append(Acc, S, T0),
+	append(T0, Sep, NextAcc),
+	fi_join(Sep, Rest, NextAcc, Result).
 
 fi_repr_list([], Result, Result).
 fi_repr_list([Obj|Objs], Acc, Result) :-
