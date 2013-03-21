@@ -22,35 +22,47 @@ def test_dict_not_equal():
 	assert not {1:1} != {1:2, 1:1}
 
 def test_dict_read_element():
-	c = {1:2, "1":"2"}
-	assert c[1] == 2
-	assert c["1"] == "2"
+	d = {1:2, "1":"2"}
+	assert d[1] == 2
+	assert d["1"] == "2"
 
 def test_dict_get_keys():
-	c = {"abc":1, 2:"def"}
-	assert c.keys() == [2, "abc"] # Associations list are ordered
+	d = {"abc":1, 2:"def"}
+	assert d.keys() == [2, "abc"] # Associations list are ordered
 
 def test_dict_get_values():
-	c = {"abc":1, 2:"def"}
-	assert c.values() == ["def", 1] # Associations list are ordered
+	d = {"abc":1, 2:"def"}
+	assert d.values() == ["def", 1] # Associations list are ordered
 
 def test_dict_in_operator():
-	c = {"a":1, "b":2}
-	assert "a" in c
-	assert "b" in c
-	assert not 1 in c
+	d = {"a":1, "b":2}
+	assert "a" in d
+	assert "b" in d
+	assert not 1 in d
 
 def test_dict_to_string():
 	assert str({1:"a"}) == "{1:'a'}"
 	assert str({}) == "{}"
 
-def test_dict_free_variables_as_values():
+def test_dict_construct_with_free_variables_as_values():
 	x, y = free
-	c = {1:x, 2:y}
-	assert c[1] == 10
-	assert c[2] == 30
-	assert str(c) == "{1:10, 2:30}"
+	d = {1:x, 2:y}
+	assert d[1] == 10
+	assert d[2] == 30
+	assert str(d) == "{1:10, 2:30}"
 
+def test_dict_index_using_free_variable():
+	k = free
+	d = {1:"a", 2:"b", 3:"a"}
+	assert d[k] == "a"
+	assert str(k) == "3"
+
+def test_dict_index_using_free_variable_and_pattern_match_value():
+	k = free
+	d = {1:"abc", 2:"b", 3:"abcd"}
+	assert "b" in d[k]
+	assert len(d[k]) == 3
+	assert str(k) == "1"
 
 class Foo:
 	def __init__(self, a, b):

@@ -136,8 +136,13 @@ pl_print([Obj|Objs], NewLine, Backtrack, InIO, OutIO) :-
 pl_subscript_wrap_elem(str, Z, pl_seq(str, [Z])).
 pl_subscript_wrap_elem(Type, Z, Z) :-
 	Type \= str.
-pl_subscript(pl_seq(dict, Assoc), Key, Elem) :-
-	get_assoc(Key, Assoc, Elem).
+pl_subscript(pl_seq(dict, Assoc), Key, Value) :-
+	ground(Key),
+	get_assoc(Key, Assoc, Value).
+pl_subscript(pl_seq(dict, Assoc), Key, Value) :-
+	not(ground(Key)),
+	assoc_to_list(Assoc, KeyValueList),
+	member(Key-Value, KeyValueList).
 pl_subscript(pl_seq(Type, L), pl_int(R), Elem) :-
 	Type \= dict,
 	R #>= 0,
@@ -166,7 +171,13 @@ f_dict(Elems, pl_seq(dict, Assoc), IO, IO) :-
 f_difference(pl_seq(set, L), pl_seq(set, R), pl_seq(set, Z), IO, IO) :-
 	ord_subtract(L, R, Z).
 
+% TODO: f_findall must be rewritten to take a predicate (the Goal argument to
+% findall/3), such that f_findall can directly map to findall/3. If not,
+% f_find all will not find all possible values. Unclear how to solve this as
+% it can potentially require major automatic rewrite/restructure of the
+% compiled program.
 f_findall(pl_int(Var), pl_seq(list, Solutions), IO, IO) :-
+	fd_var(Var),
 	findall(pl_int(Solution),
 		    (label([Var]), Var = Solution),
 		    Solutions).
