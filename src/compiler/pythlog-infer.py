@@ -14,6 +14,8 @@ class ProperyInferenceVisitor(ast.NodeVisitor):
         self._localvars = {}
         self._predicate_names = []
         self._function_hash = None
+        self._class_name = None
+        self._methods = []
 
     def code(self):
         code = "module_functions([%s]).\n\n" % ", ".join(
@@ -27,9 +29,12 @@ class ProperyInferenceVisitor(ast.NodeVisitor):
         self._pred_body.append("  " + stmt)
 
     def predicate_end(self, predicate_head):
-        stack_check = '  not(member(%s, Stack)) -> (\n' % self._function_hash
-        body = stack_check + ",\n".join(self._pred_body) + "\n  ); true"
-        self._predicates.append(predicate_head + "\n" + body + ".")
+        if len(self._pred_body) == 0:
+            self._predicates.append(predicate_head + ".")
+        else:
+            stack_check = '  not(member(%s, Stack)) -> (\n' % self._function_hash
+            body = stack_check + ",\n".join(self._pred_body) + "\n  ); true"
+            self._predicates.append(predicate_head + "\n" + body + ".")
         self._pred_body = []
         self._var_counter = 0
         self._localvars = {}
@@ -78,21 +83,46 @@ class ProperyInferenceVisitor(ast.NodeVisitor):
 
     # Statement nodes
 
+    def visit_ClassDef(self, node):
+        descr = (node.name, 0)
+        if descr not in self._predicate_names:
+            self._predicate_names.append(descr)
+
+        self.predicate_end("invoke(func('%s'), [], _:'%s', _, _Stack)" % (
+                node.name, node.name))
+
+        self._methods = []
+        self._class_name = node.name
+        for decl in node.body:
+            self.visit(decl)
+        self._class_name = None
+        self.predicate_end("methods(%s, [%s])" % (node.name, ", ".join(self._methods)))
+
+
+
     def visit_FunctionDef(self, node):
         self._function_hash = hash(ast.dump(node, include_attributes=True))
         self._localvars = {a.arg:"L0_" + a.arg for a in node.args.args}
 
+        if self._class_name is None:
+            descr = (node.name, len(node.args.args))
+            if descr not in self._predicate_names:
+                self._predicate_names.append(descr)
+            callable = "func('%s')" % node.name
+            args = ", ".join(self._localvars[a.arg] for a in node.args.args)
+        else:
+            self._methods.append("'%s'" % node.name)
+            callable = "method(Self:'%s', '%s')" % (self._class_name, node.name)
+            args = ", ".join(self._localvars[a.arg] for a in node.args.args[1:])
+
+
         for stmt in node.body:
             self.visit(stmt)
 
-        name = node.name
-        args = ", ".join(self._localvars[a.arg] for a in node.args.args)
-        head = "invoke(func('%s'), [%s], Return, _, Stack) :-" % (name, args)
+        head = "invoke(%s, [%s], Return, _, Stack) :-" % (callable, args)
         self.predicate_end(head)
 
-        descr = (name, len(node.args.args))
-        if descr not in self._predicate_names:
-            self._predicate_names.append(descr)
+
 
     def visit_Return(self, node):
         value = self.visit(node.value)
