@@ -156,7 +156,10 @@ write_properties(Func, NumArgs, Stream) :-
          write(Stream, NumArgs), write(Stream, ' '),
          write_properties_set(Set, NumArgs, Stream)
         )
-        ; true
+        ;
+        (
+         write('Failed to type check '), write(Func), nl
+        )
     ).
 
 filter_set(_, [], _, []).

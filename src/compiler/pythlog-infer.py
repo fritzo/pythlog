@@ -27,7 +27,7 @@ class ProperyInferenceVisitor(ast.NodeVisitor):
         self._pred_body.append("  " + stmt)
 
     def predicate_end(self, predicate_head):
-        stack_check = '  not(member(%s, Stack)), (\n' % self._function_hash
+        stack_check = '  not(member(%s, Stack)) -> (\n' % self._function_hash
         body = stack_check + ",\n".join(self._pred_body) + "\n  ); true"
         self._predicates.append(predicate_head + "\n" + body + ".")
         self._pred_body = []
