@@ -36,3 +36,7 @@ def test7_list_append(a):
 def test8_list_modify_and_return(a):
     a.append(1)
     return a
+
+# test9_list_literal_with_arg/1 [] [1]
+def test9_list_literal_with_arg(a):
+    var = [a]

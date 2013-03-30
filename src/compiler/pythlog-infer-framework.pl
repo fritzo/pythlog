@@ -69,22 +69,22 @@ invoke(method(_:int, '__eq__'), [_:int], _:bool, _, _Stack).
 invoke(method(_:list, '__add__'), [_:list], _:list, _, _Stack).
 invoke(method(_:list, '__contains__'), [_], _:bool, _, _Stack).
 invoke(method(_:list, '__getitem__'), [_:int], E:_, Line, _Stack) :-
-    add_freezes(E, Line).
+    freeze_object(E, Line).
 invoke(method(S:list, '__setitem__'), [_:int, E:_], _:'NoneType', Line, _Stack) :-
-    add_freezes(E, Line),
-    add_mutates(S, Line).
+    freeze_object(E, Line),
+    mutate_object(S, Line).
 invoke(method(S:list, '__delitem__'), [_:int], _:'NoneType', Line, _Stack) :-
-    add_mutates(S, Line).
+    mutate_object(S, Line).
 invoke(method(_:list, '__eq__'), [_:list], _:bool, _, _Stack).
 invoke(method(_:list, '__len__'), [], _:int, _, _Stack).
 invoke(method(_:list, '__iter__'), [], _:list_iterator, _, _Stack).
 invoke(method(S:list, append), [E:_], _:'NoneType', Line, _Stack) :- 
-    add_mutates(S, Line),
-    add_freezes(E, Line).
+    mutate_object(S, Line),
+    freeze_object(E, Line).
 
 % Builtin type 'list_iterator' (returned from list.__iter__)
 invoke(method(_:list_iterator, '__next__'), [], Result:_, Line, _Stack) :-
-    add_freezes(Result, Line).
+    freeze_object(Result, Line).
 
 
 getattr(Self:Type, Attr, method(Self:Type, Attr)) :-
@@ -107,9 +107,9 @@ getglobal(len, func(len)).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-add_freezes(Freezes, _Line) :-
+freeze_object(Freezes, _Line) :-
     put_attr(Freezes, frozen, 1).
-add_mutates(Mutates, _Line) :-
+mutate_object(Mutates, _Line) :-
     put_attr(Mutates, mutated, 1).
 
 copy_attr(Dst, Src, AttrName) :-
@@ -141,7 +141,7 @@ args_props([Arg|CallArgs], Index, AccProps, FinalProps) :-
     args_props(CallArgs, NextIndex, NextAccProps, FinalProps).
 
 get_properties(Func, _NumArgs, Props) :-
-    invoke(func(Func), CallArgs, CallResult, _, [top]),
+    invoke(func(Func), CallArgs, CallResult, _, []),
     attrs2props(CallResult, 0, ResultProps),
     args_props(CallArgs, 1, ResultProps, Props).
 

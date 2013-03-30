@@ -50,11 +50,31 @@ class ProperyInferenceVisitor(ast.NodeVisitor):
         self._var_counter += 1
         return "T%s" % n
 
-    def _context_vars(self, node):
-        return "'%s':%s:%s, [%s|Stack]" % (
-            self._filename,
-            node.lineno, node.col_offset + 1,
-            self._function_hash)
+    def _line(self, node):
+        return "'%s':%s:%s" % (self._filename, node.lineno, node.col_offset + 1)
+
+    def _line_info(self, node):
+        return "%s, [%s|Stack]" % (self._line(node), self._function_hash)
+
+    def _merge_control_paths(self, vars0, vars1, vars2):
+        all_vars = set(list(vars0.keys()) + list(vars1.keys()) + list(vars2.keys()))
+        values0, values1, values2 = [], [], []
+        for var in all_vars:
+            values0.append(vars0.get(var, 'none'))
+            values1.append(vars1.get(var, 'none'))
+            values2.append(vars2.get(var, 'none'))
+
+        new_values = []
+        for var in all_vars:
+            self._add_localvar(var)
+            new_values.append(self._localvars[var])
+
+        self.add_stmt("member(vars(%s), [vars(%s), vars(%s), vars(%s)])" % (
+            ", ".join(new_values),
+            ", ".join(values0),
+            ", ".join(values1),
+            ", ".join(values2)))
+
 
     # Statement nodes
 
@@ -83,25 +103,31 @@ class ProperyInferenceVisitor(ast.NodeVisitor):
         target = node.targets[0]
         value = self.visit(target.value)
         slice = self.visit(target.slice.value)
-        ctx = self._context_vars(node)
-        self.add_stmt("delitem(%s, %s, %s)" % (value, slice, ctx))
+        line = self._line_info(node)
+        self.add_stmt("delitem(%s, %s, %s)" % (value, slice, line))
 
     def visit_If(self, node):
         self.visit(node.test)
+        locals0 = self._localvars.copy()
         for stmt in node.body:
             self.visit(stmt)
+
+        locals1 = self._localvars.copy()            
         for stmt in node.orelse:
             self.visit(stmt)
+
+        self._merge_control_paths(locals0, locals1, self._localvars)
+
 
     def visit_For(self, node):
         target = self.visit(node.target)
         iterable = self.visit(node.iter)
-        ctx = self._context_vars(node)
-
-        self.add_stmt("for(%s, %s, %s)" % (iterable, target, ctx))
-
+        line = self._line_info(node)
+        self.add_stmt("for(%s, %s, %s)" % (iterable, target, line))
+        locals0 = self._localvars.copy()
         for stmt in node.body:
             self.visit(stmt)
+        self._merge_control_paths(locals0, self._localvars, {})
 
     def visit_Expr(self, node):
         self.visit(node.value)
@@ -113,8 +139,8 @@ class ProperyInferenceVisitor(ast.NodeVisitor):
         if target.__class__ == ast.Subscript:
             list = self.visit(target.value)
             slice = self.visit(target.slice.value)
-            ctx = self._context_vars(node)
-            self.add_stmt("setitem(%s, %s, %s, %s)" % (list, slice, value, ctx))
+            line = self._line_info(node)
+            self.add_stmt("setitem(%s, %s, %s, %s)" % (list, slice, value, line))
         else:
             self.add_stmt("%s = %s" % (self.visit(target), value))
 
@@ -123,6 +149,10 @@ class ProperyInferenceVisitor(ast.NodeVisitor):
         return "_:int"
 
     def visit_List(self, node):
+        line = self._line(node)
+        for e in node.elts:
+            var = self._tmpvar()
+            self.add_stmt("%s:_ = %s, freeze_object(%s, %s)" % (var, self.visit(e), var, line))
         return "_:list"
 
     def visit_BinOp(self, node):
@@ -130,8 +160,8 @@ class ProperyInferenceVisitor(ast.NodeVisitor):
         rhs = self.visit(node.right)
         op = node.op.__class__.__name__.lower()
         result = self._tmpvar()
-        ctx = self._context_vars(node)
-        self.add_stmt('binop(%s, %s, %s, %s, %s)' % (op, lhs, rhs, result, ctx))
+        line = self._line_info(node)
+        self.add_stmt('binop(%s, %s, %s, %s, %s)' % (op, lhs, rhs, result, line))
         return result
 
     def visit_Compare(self, node):
@@ -141,16 +171,16 @@ class ProperyInferenceVisitor(ast.NodeVisitor):
         lhs = self.visit(node.left)
         rhs = self.visit(node.comparators[0])
         result = self._tmpvar()
-        ctx = self._context_vars(node)
-        self.add_stmt("cmp(%s, %s, %s, %s, %s)" % (op, lhs, rhs, result, ctx))
+        line = self._line_info(node)
+        self.add_stmt("cmp(%s, %s, %s, %s, %s)" % (op, lhs, rhs, result, line))
         return result
 
     def visit_Call(self, node):
         name = self.visit(node.func)
         args = ", ".join(self.visit(a) for a in node.args)
         result = self._tmpvar()
-        ctx = self._context_vars(node)
-        self.add_stmt("invoke(%s, [%s], %s, %s)" % (name, args, result, ctx))
+        line = self._line_info(node)
+        self.add_stmt("invoke(%s, [%s], %s, %s)" % (name, args, result, line))
         return result
 
     def visit_Attribute(self, node):
@@ -175,8 +205,8 @@ class ProperyInferenceVisitor(ast.NodeVisitor):
         value = self.visit(node.value)
         slice = self.visit(node.slice.value)
         result = self._tmpvar()
-        ctx = self._context_vars(node)
-        self.add_stmt("getitem(%s, %s, %s, %s)" % (value, slice, result, ctx))
+        line = self._line_info(node)
+        self.add_stmt("getitem(%s, %s, %s, %s)" % (value, slice, result, line))
         return result
 
 def generate_prolog_code(code, filename):
