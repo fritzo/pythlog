@@ -337,7 +337,7 @@ def int_and_body():
     bits = "[%s, %s] ins 0..1" % (l_bits, r_bits)
     l = "Ls #= " + " + ".join("L%s * %s" % (b, 2**b) for b in idxs)
     r = "Rs #= " + " + ".join("R%s * %s" % (b, 2**b) for b in idxs)
-    result = "Result #= " + " + ".join("L%s * R%s * %s" % (b, b, 2**b) for b in idxs)
+    result = "UnsignedResult #= " + " + ".join("L%s * R%s * %s" % (b, b, 2**b) for b in idxs)
     return ",\n    ".join([
             'no_sign(L, Ls), no_sign(R, Rs)',
             bits, l, r, result])
@@ -428,7 +428,8 @@ m___rshift__(t_int(L), [t_int(R)], _Io, t_int(Result)) :-
 m___lshift__(t_int(L), [t_int(R)], _Io, t_int(Result)) :-
     Result #= L * (2 ^ R).
 m___and__(t_int(L), [t_int(R)], _Io, t_int(Result)) :-
-    {int_and_body}.
+    {int_and_body},
+    fix_sign(UnsignedResult, Result).
 m___neg__(t_int(I), [], _Io, t_int(-I)).
 m___invert__(t_int(I), [], _Io, t_int(Result)) :-
     Result #= -I -1.
@@ -438,6 +439,11 @@ no_sign(I, Is) :-
     I #< 0, !,
     Is #= {max_bit_val} + I.
 no_sign(I, I).
+fix_sign(I, I) :-
+    I #< {max_bit_val} / 2, !.
+fix_sign(I, Result) :-
+    I #> {max_bit_val} / 2, !,
+    Result #= I - {max_bit_val}.
 
 to_print_string([], Acc, t_str(Acc)).
 to_print_string([H|T], Acc, Result) :-

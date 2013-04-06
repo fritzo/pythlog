@@ -68,6 +68,7 @@ def int_test7_bit_inverse():
 def int_test8_bit_and():
     assert 64372483 & 473982479238 == 59124482
     assert -749382 & 43792 == 32784
+    assert -239223 & -98126524 == -98299648
 
 def fac(n):
     assert n >= 0
@@ -94,3 +95,6 @@ def main():
     int_test8_bit_and()
     int_test10_factorial()
     print(777)
+
+
+# 12 - 20
