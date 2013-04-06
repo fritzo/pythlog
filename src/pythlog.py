@@ -57,11 +57,13 @@ class StatementTranslator(ast.NodeVisitor):
     def __init__(self, allocator, globals):
         self._allocator = allocator
         self._globals = globals
-        self._code = []
         self._predicates = []
+        self._code = []
+        self._code_prefix = ['(true']
+        self._code_suffix = ['true)']
 
     def code(self):
-        return self._code
+        return self._code_prefix + self._code + self._code_suffix
 
     def predicates(self):
         """Get any additional predicates created while translating the
@@ -123,7 +125,7 @@ class StatementTranslator(ast.NodeVisitor):
 
     def visit_Return(self, node):
         value = self.visit(node.value)
-        self._code.append('i_return(Result, %s)' % value)
+        self._code.append('i_return(Result, %s), DidReturn = 1' % value)
         return self._code
 
     def visit_Expr(self, node):
@@ -131,18 +133,24 @@ class StatementTranslator(ast.NodeVisitor):
         return self._code
 
     def visit_If(self, node):
+        self._code_prefix = ['(true']
         test = self.visit(node.test)
-        body = []
+
+        st = StatementTranslator(self._allocator, self._globals)
         for stmt in node.body:
-            st = StatementTranslator(self._allocator, self._globals)
-            body.extend(st.visit(stmt))
-        orelse = []
+            st.visit(stmt)
+        body = st.code()
+        self._predicates.extend(st.predicates())
+
+        st = StatementTranslator(self._allocator, self._globals)
         for stmt in node.orelse:
-            st = StatementTranslator(self._allocator, self._globals)
-            orelse.extend(st.visit(stmt))
+            st.visit(stmt)
+        orelse = st.code()
+        self._predicates.extend(st.predicates())
+
 
         name = self._allocator.globalsym()
-        args = node.invars + node.outvars + ["Io"]
+        args = node.invars + node.outvars + ['Io', 'Result', 'DidReturn']
 
         self._predicates.append(generate_predicate(name,
                                                    ['t_bool(1)'] + args,
@@ -151,14 +159,17 @@ class StatementTranslator(ast.NodeVisitor):
                                                    ['t_bool(0)'] + args,
                                                    orelse))
         self._code.append('%s(%s, %s)' % (name, test, ", ".join(args)))
+        self._code.extend(self._code_suffix)
+        self._code.append('((DidReturn \= 1)-> (true')
+        self._code_suffix = ['true); true)']
         return self._code
 
 def generate_predicate(name, args, body):
+    head = "%s(%s)" % (name, ", ".join(args))
     if len(body) == 0:
-        suffix = "."
-    else:
-        suffix = " :-\n  " + ",\n  ".join(body) + "."
-    return "%s(%s)%s" % (name, ", ".join(args), suffix)
+        return head + "."   
+    suffix = " :-\n  " + ",\n  ".join(body) + "."
+    return head + suffix
 
 class FunctionTranslator(ast.NodeVisitor):
     def __init__(self, node, allocator, globals):
@@ -169,12 +180,12 @@ class FunctionTranslator(ast.NodeVisitor):
         self._predicates = []
 
     def predicates(self):
+        st = StatementTranslator(self._allocator, self._globals)
         for stmt in self._node.body:
-            st = StatementTranslator(self._allocator, self._globals)
 #            print(ast.dump(stmt))
             st.visit(stmt)
-            self._code.extend(st.code())
-            self._predicates.extend(st.predicates())
+        self._code.extend(st.code())
+        self._predicates.extend(st.predicates())
 
         func_args = "[%s]" % (", ".join(a.arg for a in self._node.args.args))
         pred_args = [func_args, 'Io', 'Result']
@@ -318,9 +329,9 @@ def main():
     outfile.close()
 
 
-
+BITS = 64
 def int_and_body():
-    idxs = range(0, 64) # Bits
+    idxs = range(0, BITS) # Bits
     l_bits = ", ".join("L%s" % b for b in idxs)
     r_bits = ", ".join("R%s" % b for b in idxs)
     bits = "[%s, %s] ins 0..1" % (l_bits, r_bits)
@@ -467,7 +478,7 @@ start :-
 :- style_check(-singleton).
 :- style_check(-discontiguous).
 
-""".format(int_and_body=int_and_body(), max_bit_val=2**64)
+""".format(int_and_body=int_and_body(), max_bit_val=2**BITS)
 
 if __name__ == '__main__':
     main()

@@ -72,10 +72,9 @@ def int_test8_bit_and():
 def fac(n):
     assert n >= 0
     if n == 0:
-        f = 1
+        return 1
     else:
-        f = fac(n - 1) * n
-    return f
+        return fac(n - 1) * n
 
 def int_test10_factorial():
     assert fac(7) == 5040
