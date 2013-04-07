@@ -79,7 +79,7 @@ class StatementTranslator(ast.NodeVisitor):
 
     def visit_UnaryOp(self, node):
         operand = self.visit(node.operand)
-        op = node.op.__class__.__name__.lower()
+        op = type(node.op).__name__.lower()
         result = self._allocator.tempvar()
         self._code.append('i_unary%s(%s, %s)' % (op, operand, result))
         return result
@@ -88,7 +88,7 @@ class StatementTranslator(ast.NodeVisitor):
     def visit_BinOp(self, node):
         lhs = self.visit(node.left)
         rhs = self.visit(node.right)
-        op = node.op.__class__.__name__.lower()
+        op = type(node.op).__name__.lower()
         result = self._allocator.tempvar()
         self._code.append('i_bin%s(%s, %s, %s)' % (op, lhs, rhs, result))
         return result
@@ -96,7 +96,7 @@ class StatementTranslator(ast.NodeVisitor):
     def visit_Compare(self, node):
         assert len(node.ops) == 1
         assert len(node.comparators) == 1
-        op = node.ops[0].__class__.__name__.lower()
+        op = type(node.ops[0]).__name__.lower()
         lhs = self.visit(node.left)
         rhs = self.visit(node.comparators[0])
         result = self._allocator.tempvar()
@@ -105,8 +105,12 @@ class StatementTranslator(ast.NodeVisitor):
 
     def visit_Call(self, node):
         result = self._allocator.tempvar()
-        args = ", ".join(self.visit(a) for a in node.args)
-        self._code.append("%s([%s], Io, %s)" % (node.func.id, args, result))
+        pred_args = []
+        if node.implicit is not None:
+            pred_args.append(self.visit(node.implicit))
+        call_args = "[" + ", ".join(self.visit(a) for a in node.args) + "]"
+        pred_args.extend([call_args, 'Io', result])
+        self._code.append("%s(%s)" % (node.func.id, ", ".join(pred_args)))
         return result
 
     # Statement nodes
@@ -174,11 +178,26 @@ def generate_predicate(name, args, body):
 
 def translate_function(func_node, allocator, globals):
     """
-    Translates the function (described by the AST node 'func_node') into
+    Translates a function (described by the AST node 'func_node') into
     Prolog code. Returns a list of predicates.
     """
     code = []
     predicates = []
+
+    if func_node.constructs is None:
+        result = 'Result'
+    else:
+        result = 't_object(%s)' % func_node.constructs
+
+    if func_node.args.implicit is None:
+        pred_args = []
+    else:
+        pred_args = [func_node.args.implicit.arg]
+        anno_tr = StatementTranslator(allocator, globals)
+        anno_result = anno_tr.visit(func_node.args.implicit.annotation)
+        code.extend(anno_tr.code())
+        code.append('%s = %s' % (func_node.args.implicit.arg, anno_result))
+
     st = StatementTranslator(allocator, globals)
     for stmt in func_node.body:
 #            print(ast.dump(stmt))
@@ -187,19 +206,59 @@ def translate_function(func_node, allocator, globals):
     predicates.extend(st.predicates())
 
     func_args = "[%s]" % (", ".join(a.arg for a in func_node.args.args))
-    pred_args = [func_args, 'Io', 'Result']
+    pred_args.extend([func_args, 'Io', result])
     predicates.append(generate_predicate(func_node.name,
                                          pred_args,
                                          code))
     return predicates
 
+def translate_class(class_node, allocator, globals):
+    """
+    Translates a class (described by the AST node 'class_node') into Prolog
+    code. Returns a list of predicates.
+    """
+    predicates = []
+#    print(ast.dump(class_node))
+    for decl in class_node.body:
+        predicates.extend(translate_function(decl, allocator, globals))
+    return predicates
+
+
+EMPTY_CTOR_DEF = ast.FunctionDef(name='__init__',
+                                 args=ast.arguments(args=[ast.arg(arg='self',
+                                                                  annotation=None)],
+                                                    vararg=None,
+                                                    varargannotation=None,
+                                                    kwonlyargs=[],
+                                                    kwarg=None,
+                                                    kwargannotation=None,
+                                                    defaults=[],
+                                                    kw_defaults=[]),
+                                 body=[ast.Pass()],
+                                 decorator_list=[],
+                                 returns=None)
+
+def implicit_arg_annotation(class_node):
+    return ast.Call(func=ast.Name(id=class_node.name, ctx=ast.Load()),
+                    args=[],
+                    keywords=[],
+                    starargs=None,
+                    kwargs=None)
+
 class SsaRewriter(ast.NodeTransformer):
     """
     Rewrites code to use single static assignment form. Also, fixes names of
     classes and functions such that they don't conflict with Prolog builtins.
+
+    Furthermore, some irregularities are rewritten into a canonical form, such
+    as not all classes having an explicit constructor.
     """
     def __init__(self):
         self._locals = {}
+        self._class_has_ctor = False
+        self._current_class_node = None # None => not in class decl
+        # Constructors need some special handling
+        self._currently_translating_constructor = False
 
     def _localvar_index(self, id, locs):
         return int(locs[id][len(id) + 1:])
@@ -225,28 +284,86 @@ class SsaRewriter(ast.NodeTransformer):
                                          annotation=node.annotation),
                                  node)
 
+    def visit_arguments(self, node):
+        """
+        Rewrite the argument list of a function such that it's clear if and
+        argument is an "implicit" argument (the 'self' argument of methods).
+        An Implicit argument is moved to a new attribute of the AST node
+        called 'implicit'. Constructors are modeled by returning a new
+        object, thus, constructors does not have an implicit argument.
+        """
+        implicit = None 
+        unvisited_args = node.args
+        if self._current_class_node is not None:
+            unvisited_args = node.args[1:]
+            if not self._currently_translating_constructor:
+                implicit = self.visit(node.args[0])
+                implicit.annotation = self.visit(implicit_arg_annotation(self._current_class_node))
+        new = ast.arguments(args=[self.visit(a) for a in unvisited_args],
+                            vararg=node.vararg,
+                            varargannotation=node.varargannotation,
+                            kwonlyargs=node.kwonlyargs,
+                            kwarg=node.kwarg,
+                            kwargannotation=node.kwargannotation,
+                            defaults=node.defaults,
+                            kw_defaults=node.kw_defaults)
+        new._fields = new._fields + ('implicit', )
+        new.implicit = implicit
+
+        return ast.copy_location(new, node)
+
+    def _predicate_name_for_function_name(self, node):
+        """
+        Get the prolog name for a python function name, taking into account
+        if the function is part of a class declaration.
+        """
+        if self._current_class_node is not None:
+            if node.name == '__init__':
+                return 'g_' + self._current_class_node.name # ctor name
+            else:
+                return "m_" + node.name #  method name
+        else:
+            return "g_" + node.name # global function
+
     def visit_FunctionDef(self, node):
         """
         Makes the name of functions not clash with Prolog names by prefixing
         the function name with 'g_' (read: global_). Also, clears some state
         needed for translating functions.
         """
+        if self._current_class_node is not None and node.name == '__init__':
+            self._class_has_ctor = True
+            self._currently_translating_constructor = True
+            constructs = "t_" + self._current_class_node.name
+        else:
+            self._currently_translating_constructor = False
+            constructs = None
+
+        pred_name = self._predicate_name_for_function_name(node)
         self._locals = {} # New function started => clear locals
         args = self.visit(node.args) # Must be visited before the body
         body = [self.visit(stmt) for stmt in node.body]
-        new = ast.FunctionDef(name="g_" + node.name,
+        new = ast.FunctionDef(name=pred_name,
                               args=args,
                               body=body)
+
+        new.constructs = constructs
+        new._fields = new._fields + ('constructs', )
         return ast.copy_location(new, node)
 
     def visit_ClassDef(self, node):
         """
         Makes the name of classes not class Prolog names by predicates by
         prefixing the class name wit a 'g_' (read: global_).
+        Also, add an empty constructor if no one was explicitly defined.
         """
-        print(ast.dump(node))
+        self._class_has_ctor = False # This may be modified when visiting the body
+        self._current_class_node = node
         body = [self.visit(decl) for decl in node.body]
-        new = ast.ClassDef(name='g_' + node.name,
+        if not self._class_has_ctor:
+            body.append(self.visit(EMPTY_CTOR_DEF))
+        self._current_class_node = None
+        new = ast.ClassDef(name='t_' + node.name,
                            bases=node.bases,
                            keywords=node.keywords,
                            starargs=node.starargs,
@@ -264,6 +381,7 @@ class SsaRewriter(ast.NodeTransformer):
         this function adds a field to the if-node called 'outvars', which is the
         set of variables assigned by this node.
         """
+        # TODO: Horrible mess of code... rewrite!
         test = self.visit(node.test)
         locals_before = self._locals.copy()
         body = [self.visit(stmt) for stmt in node.body]
@@ -304,13 +422,34 @@ class SsaRewriter(ast.NodeTransformer):
     def visit_Name(self, node):
         if node.id == 'free':
             id = self._new_local(node.id)
-        elif node.ctx.__class__ == ast.Store:
+        elif type(node.ctx) == ast.Store:
             id = self._new_local(node.id)
         elif node.id in self._locals:
             id = self._locals[node.id]
         else:
             id = "g_" + node.id # Not a local var => global name
         new = ast.Name(id=id, ctx=node.ctx)
+        return ast.copy_location(new, node)
+
+    def visit_Call(self, node):
+        """
+        Translates call of the type 'object.method(args)' into
+        'method(implicit=object, args)'.
+        """
+        if type(node.func) == ast.Attribute:
+            func = ast.Name(id='m_' + node.func.attr, ctx=ast.Load())
+            implicit = self.visit(node.func.value)
+        else:
+            func = self.visit(node.func)
+            implicit = None
+        new = ast.Call(func=func,
+                       args=[self.visit(a) for a in node.args],
+                       keywords=node.keywords,
+                       starargs=node.starargs,
+                       kwargs=node.kwargs)
+        new.implicit = implicit
+        new._fields = new._fields + ('implicit', )
+
         return ast.copy_location(new, node)
 
     def visit_Assign(self, node):
