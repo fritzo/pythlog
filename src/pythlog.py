@@ -339,8 +339,32 @@ def int_and_body():
     r = "Rs #= " + " + ".join("R%s * %s" % (b, 2**b) for b in idxs)
     result = "UnsignedResult #= " + " + ".join("L%s * R%s * %s" % (b, b, 2**b) for b in idxs)
     return ",\n    ".join([
-            'no_sign(L, Ls), no_sign(R, Rs)',
             bits, l, r, result])
+
+
+def int_or_body():
+    idxs = range(0, BITS) # Bits
+    l_bits = ", ".join("L%s" % b for b in idxs)
+    r_bits = ", ".join("R%s" % b for b in idxs)
+    bits = "[%s, %s] ins 0..1" % (l_bits, r_bits)
+    l = "Ls #= " + " + ".join("L%s * %s" % (b, 2**b) for b in idxs)
+    r = "Rs #= " + " + ".join("R%s * %s" % (b, 2**b) for b in idxs)
+    result = "UnsignedResult #= " + " + ".join("(L%s + R%s - L%s * R%s) * %s" % (b, b, b, b, 2**b) for b in idxs)
+    return ",\n    ".join([
+            bits, l, r, result])
+
+def int_xor_body():
+    idxs = range(0, BITS) # Bits
+    l_bits = ", ".join("L%s" % b for b in idxs)
+    r_bits = ", ".join("R%s" % b for b in idxs)
+    bits = "[%s, %s] ins 0..1" % (l_bits, r_bits)
+    l = "Ls #= " + " + ".join("L%s * %s" % (b, 2**b) for b in idxs)
+    r = "Rs #= " + " + ".join("R%s * %s" % (b, 2**b) for b in idxs)
+    result = "UnsignedResult #= " + " + ".join("(L%s + R%s - 2 * L%s * R%s) * %s" % (b, b, b, b, 2**b) for b in idxs)
+    return ",\n    ".join([
+            bits, l, r, result])
+
+
 
 BUILTINS = """
 ?- use_module(library(clpfd)).
@@ -349,43 +373,55 @@ i_assign(Var, Var).
 
 i_assert(t_bool(1)).
 
-% TODO: These cuts should not be here.
+
 i_binadd(L, R, Result) :-
-    m___add__(L, [R], _, Result), !.
+    m___add__(L, [R], _, Result).
 i_binadd(L, R, Result) :-
-    m___radd__(R, [L], _, Result), !.
+    m___radd__(R, [L], _, Result).
 i_binsub(L, R, Result) :-
-    m___sub__(L, [R], _, Result), !.
+    m___sub__(L, [R], _, Result).
 i_binsub(L, R, Result) :-
-    m___rsub__(R, [L], _, Result), !.
+    m___rsub__(R, [L], _, Result).
 i_binmult(L, R, Result) :-
-    m___mult__(L, [R], _, Result), !.
+    m___mul__(L, [R], _, Result).
 i_binmult(L, R, Result) :-
-    m___rmult__(R, [L], _, Result), !.
+    m___rmul__(R, [L], _, Result).
 i_bindiv(L, R, Result) :-
-    m___div__(L, [R], _, Result), !.
+    m___truediv__(L, [R], _, Result).
 i_bindiv(L, R, Result) :-
-    m___rdiv__(R, [L], _, Result), !.
+    m___rtruediv__(R, [L], _, Result).
+i_binfloordiv(L, R, Result) :-
+    m___floordiv__(L, [R], _, Result).
+i_binfloordiv(L, R, Result) :-
+    m___rfloordiv__(R, [L], _, Result).
 i_binmod(L, R, Result) :-
-    m___mod__(L, [R], _, Result), !.
+    m___mod__(L, [R], _, Result).
 i_binmod(L, R, Result) :-
-    m___rmod__(R, [L], _, Result), !.
+    m___rmod__(R, [L], _, Result).
 i_binpow(L, R, Result) :-
-    m___pow__(L, [R], _, Result), !.
+    m___pow__(L, [R], _, Result).
 i_binpow(L, R, Result) :-
-    m___rpow__(R, [L], _, Result), !.
+    m___rpow__(R, [L], _, Result).
 i_binrshift(L, R, Result) :-
-    m___rshift__(L, [R], _, Result), !.
+    m___rshift__(L, [R], _, Result).
 i_binrshift(L, R, Result) :-
-    m___rrshift__(R, [L], _, Result), !.
+    m___rrshift__(R, [L], _, Result).
 i_binlshift(L, R, Result) :-
-    m___lshift__(L, [R], _, Result), !.
+    m___lshift__(L, [R], _, Result).
 i_binlshift(L, R, Result) :-
-    m___rlshift__(R, [L], _, Result), !.
+    m___rlshift__(R, [L], _, Result).
 i_binbitand(L, R, Result) :-
-    m___and__(L, [R], _, Result), !.
+    m___and__(L, [R], _, Result).
 i_binbitand(L, R, Result) :-
-    m___rand__(R, [L], _, Result), !.
+    m___rand__(R, [L], _, Result).
+i_binbitor(L, R, Result) :-
+    m___or__(L, [R], _, Result).
+i_binbitor(L, R, Result) :-
+    m___ror__(R, [L], _, Result).
+i_binbitxor(L, R, Result) :-
+    m___xor__(L, [R], _, Result).
+i_binbitxor(L, R, Result) :-
+    m___rxor__(R, [L], _, Result).
 
 i_unaryusub(I, Result) :-
     m___neg__(I, [], _, Result).
@@ -412,9 +448,11 @@ m___add__(t_int(L), [t_int(R)], _Io, t_int(Result)) :-
     Result #= L + R.
 m___sub__(t_int(L), [t_int(R)], _Io, t_int(Result)) :-
     Result #= L - R.
-m___mult__(t_int(L), [t_int(R)], _Io, t_int(Result)) :-
+m___mul__(t_int(L), [t_int(R)], _Io, t_int(Result)) :-
     Result #= L * R.
-m___div__(t_int(L), [t_int(R)], _Io, t_int(Result)) :-
+m___rmul__(t_int(R), [t_int(L)], _Io, t_int(Result)) :-
+    Result #= L * R.
+m___floordiv__(t_int(L), [t_int(R)], _Io, t_int(Result)) :-
     Result #= L / R.
 m___mod__(t_int(L), [t_int(R)], _Io, t_int(Result)) :-
     L #< 0, R #< 0, !,
@@ -428,7 +466,34 @@ m___rshift__(t_int(L), [t_int(R)], _Io, t_int(Result)) :-
 m___lshift__(t_int(L), [t_int(R)], _Io, t_int(Result)) :-
     Result #= L * (2 ^ R).
 m___and__(t_int(L), [t_int(R)], _Io, t_int(Result)) :-
+    no_sign(L, Ls),
+    no_sign(R, Rs),
     {int_and_body},
+    fix_sign(UnsignedResult, Result).
+m___rand__(t_int(R), [t_int(L)], _Io, t_int(Result)) :-
+    no_sign(L, Ls),
+    no_sign(R, Rs),
+    {int_and_body},
+    fix_sign(UnsignedResult, Result).
+m___or__(t_int(L), [t_int(R)], _Io, t_int(Result)) :-
+    no_sign(L, Ls),
+    no_sign(R, Rs),
+    {int_or_body},
+    fix_sign(UnsignedResult, Result).
+m___ror__(t_int(R), [t_int(L)], _Io, t_int(Result)) :-
+    no_sign(L, Ls),
+    no_sign(R, Rs),
+    {int_or_body},
+    fix_sign(UnsignedResult, Result).
+m___xor__(t_int(L), [t_int(R)], _Io, t_int(Result)) :-
+    no_sign(L, Ls),
+    no_sign(R, Rs),
+    {int_xor_body},
+    fix_sign(UnsignedResult, Result).
+m___rxor__(t_int(R), [t_int(L)], _Io, t_int(Result)) :-
+    no_sign(L, Ls),
+    no_sign(R, Rs),
+    {int_xor_body},
     fix_sign(UnsignedResult, Result).
 m___neg__(t_int(I), [], _Io, t_int(-I)).
 m___invert__(t_int(I), [], _Io, t_int(Result)) :-
@@ -436,13 +501,13 @@ m___invert__(t_int(I), [], _Io, t_int(Result)) :-
 
 
 no_sign(I, Is) :-
-    I #< 0, !,
+    I #< 0,
     Is #= {max_bit_val} + I.
 no_sign(I, I).
 fix_sign(I, I) :-
-    I #< {max_bit_val} / 2, !.
+    I #< {max_bit_val} / 2.
 fix_sign(I, Result) :-
-    I #> {max_bit_val} / 2, !,
+    I #> {max_bit_val} / 2,
     Result #= I - {max_bit_val}.
 
 to_print_string([], Acc, t_str(Acc)).
@@ -484,7 +549,10 @@ start :-
 :- style_check(-singleton).
 :- style_check(-discontiguous).
 
-""".format(int_and_body=int_and_body(), max_bit_val=2**BITS)
+""".format(int_and_body=int_and_body(),
+           int_or_body=int_or_body(),
+           int_xor_body=int_xor_body(),
+           max_bit_val=2**BITS)
 
 if __name__ == '__main__':
     main()
