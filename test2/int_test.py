@@ -132,7 +132,7 @@ def main():
     int_test10_bit_xor()
 
     int_test20_factorial()
-    print(777)
+    print(1)
 
 
 # 12 - 20

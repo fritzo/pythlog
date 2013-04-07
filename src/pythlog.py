@@ -41,16 +41,16 @@ class ModuleTranslator(ast.NodeVisitor):
         return "\n\n".join(self._predicates)
 
     def visit_FunctionDef(self, node):
-        ft = FunctionTranslator(node,
-                               self._allocator,
-                               self._global_symbols)
-        self._predicates.extend(ft.predicates())
+        predicates = translate_function(node,
+                                        self._allocator,
+                                        self._global_symbols)
+        self._predicates.extend(predicates)
 
     def visit_ClassDef(self, node):
-        ct = ClassTranslator(node,
-                            self._allocator,
-                            self._global_symbols)
-        self._predicates.append(ct.predicates(node.body))
+        predicates = translate_class(node,
+                                     self._allocator,
+                                     self._global_symbols)
+        self._predicates.extend(predicates)
 
 
 class StatementTranslator(ast.NodeVisitor):
@@ -171,30 +171,33 @@ def generate_predicate(name, args, body):
     suffix = " :-\n  " + ",\n  ".join(body) + "."
     return head + suffix
 
-class FunctionTranslator(ast.NodeVisitor):
-    def __init__(self, node, allocator, globals):
-        self._node = node
-        self._allocator = allocator
-        self._globals = globals
-        self._code = []
-        self._predicates = []
 
-    def predicates(self):
-        st = StatementTranslator(self._allocator, self._globals)
-        for stmt in self._node.body:
+def translate_function(func_node, allocator, globals):
+    """
+    Translates the function (described by the AST node 'func_node') into
+    Prolog code. Returns a list of predicates.
+    """
+    code = []
+    predicates = []
+    st = StatementTranslator(allocator, globals)
+    for stmt in func_node.body:
 #            print(ast.dump(stmt))
-            st.visit(stmt)
-        self._code.extend(st.code())
-        self._predicates.extend(st.predicates())
+        st.visit(stmt)
+    code.extend(st.code())
+    predicates.extend(st.predicates())
 
-        func_args = "[%s]" % (", ".join(a.arg for a in self._node.args.args))
-        pred_args = [func_args, 'Io', 'Result']
-        self._predicates.append(generate_predicate(self._node.name,
-                                                   pred_args,
-                                                   self._code))
-        return self._predicates
+    func_args = "[%s]" % (", ".join(a.arg for a in func_node.args.args))
+    pred_args = [func_args, 'Io', 'Result']
+    predicates.append(generate_predicate(func_node.name,
+                                         pred_args,
+                                         code))
+    return predicates
 
 class SsaRewriter(ast.NodeTransformer):
+    """
+    Rewrites code to use single static assignment form. Also, fixes names of
+    classes and functions such that they don't conflict with Prolog builtins.
+    """
     def __init__(self):
         self._locals = {}
 
@@ -214,6 +217,9 @@ class SsaRewriter(ast.NodeTransformer):
         return next_id
 
     def visit_arg(self, node):
+        """
+        Add the functions arguments to the dict of local variables.
+        """
         newarg = self._new_local(node.arg)
         return ast.copy_location(ast.arg(arg=newarg,
                                          annotation=node.annotation),
@@ -222,7 +228,8 @@ class SsaRewriter(ast.NodeTransformer):
     def visit_FunctionDef(self, node):
         """
         Makes the name of functions not clash with Prolog names by prefixing
-        the function name with 'g_' (read: global_). 
+        the function name with 'g_' (read: global_). Also, clears some state
+        needed for translating functions.
         """
         self._locals = {} # New function started => clear locals
         args = self.visit(node.args) # Must be visited before the body
@@ -231,6 +238,24 @@ class SsaRewriter(ast.NodeTransformer):
                               args=args,
                               body=body)
         return ast.copy_location(new, node)
+
+    def visit_ClassDef(self, node):
+        """
+        Makes the name of classes not class Prolog names by predicates by
+        prefixing the class name wit a 'g_' (read: global_).
+        """
+        print(ast.dump(node))
+        body = [self.visit(decl) for decl in node.body]
+        new = ast.ClassDef(name='g_' + node.name,
+                           bases=node.bases,
+                           keywords=node.keywords,
+                           starargs=node.starargs,
+                           kwargs=node.kwargs,
+                           body=body,
+                           decorator_list=node.decorator_list)
+        return ast.copy_location(new, node)
+
+
 
     def visit_If(self, node):
         """
