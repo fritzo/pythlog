@@ -16,6 +16,62 @@ class FindGlobalSymbols(ast.NodeVisitor):
     def visit_ClassDef(self, node):
         self._symbols.add(node.name)
 
+class FindClassAttributes(ast.NodeVisitor):
+    def __init__(self):
+        self._attrs = set()
+
+    def attributes(self):
+        return self._attrs
+
+    def visit_Attribute(self, node):
+        if type(node.value) == ast.Name and node.value.id == 'self':
+            self._attrs.add(node.attr)
+
+def class_attributes(class_node):
+    """
+    Get all attributes of a class. Returns a set of str:s.
+    """
+    visitor = FindClassAttributes()
+    visitor.visit(class_node)
+    return visitor.attributes()
+
+
+class NodeTransformer(ast.NodeTransformer):
+    """
+    Base class with some convinience methods for instanciating nodes.
+    """
+    def visit(self, node):
+        """
+        Like the ast.NodeTransformer.visit function except for the natural
+        extension of handling list.
+        """
+        if node is None:
+            return node
+        elif type(node) == list:
+            return [ast.NodeTransformer.visit(self, n) for n in node]
+        elif type(node) == str:
+            return node
+        else:
+            return ast.NodeTransformer.visit(self, node)
+
+    def copy_node(self, old_node, new_type=None, **overrides):
+        """
+        Copies a node and adds/overrides some attributes. Optionally
+        a new type can be used for the new node.
+        """
+        new_node = (new_type or type(old_node))()
+        new_fields = tuple(set(overrides.keys()).difference(new_node._fields))
+        new_node._fields = old_node._fields + new_fields
+        for attr in new_node._fields:
+            if attr in overrides:
+                value = overrides[attr]
+            elif hasattr(old_node, attr):
+                value = self.visit(getattr(old_node, attr))
+            setattr(new_node, attr, value)
+
+        return ast.copy_location(new_node, old_node)
+    
+
 class Allocator:
     def __init__(self):
         self._counter = 0
@@ -105,11 +161,8 @@ class StatementTranslator(ast.NodeVisitor):
 
     def visit_Call(self, node):
         result = self._allocator.tempvar()
-        pred_args = []
-        if node.implicit is not None:
-            pred_args.append(self.visit(node.implicit))
         call_args = "[" + ", ".join(self.visit(a) for a in node.args) + "]"
-        pred_args.extend([call_args, 'Io', result])
+        pred_args = [call_args, 'Io', result]
         self._code.append("%s(%s)" % (node.func.id, ", ".join(pred_args)))
         return result
 
@@ -122,9 +175,16 @@ class StatementTranslator(ast.NodeVisitor):
 
     def visit_Assign(self, node):
         assert len(node.targets) == 1
-        target = self.visit(node.targets[0])
         value = self.visit(node.value)
-        self._code.append('i_assign(%s, %s)' % (target, value))
+        if type(node.targets[0]) == ast.Name:
+            target = self.visit(node.targets[0])
+            self._code.append('i_assign(%s, %s)' % (target, value))
+        elif type(node.targets[0]) == ast.Attribute:
+            target = self.visit(node.targets[0].value)
+            attr = node.targets[0].attr
+            self._code.append('i_setattr(%s, %s, %s)' % (target, attr, value))    
+        else:
+            assert False
         return self._code
 
     def visit_Return(self, node):
@@ -179,24 +239,11 @@ def generate_predicate(name, args, body):
 def translate_function(func_node, allocator, globals):
     """
     Translates a function (described by the AST node 'func_node') into
-    Prolog code. Returns a list of predicates.
+    Prolog code. Returns a list of predicates (one function might translate
+    into several predicates).
     """
     code = []
     predicates = []
-
-    if func_node.constructs is None:
-        result = 'Result'
-    else:
-        result = 't_object(%s)' % func_node.constructs
-
-    if func_node.args.implicit is None:
-        pred_args = []
-    else:
-        pred_args = [func_node.args.implicit.arg]
-        anno_tr = StatementTranslator(allocator, globals)
-        anno_result = anno_tr.visit(func_node.args.implicit.annotation)
-        code.extend(anno_tr.code())
-        code.append('%s = %s' % (func_node.args.implicit.arg, anno_result))
 
     st = StatementTranslator(allocator, globals)
     for stmt in func_node.body:
@@ -206,7 +253,8 @@ def translate_function(func_node, allocator, globals):
     predicates.extend(st.predicates())
 
     func_args = "[%s]" % (", ".join(a.arg for a in func_node.args.args))
-    pred_args.extend([func_args, 'Io', result])
+    pred_args = [func_args, 'Io', 'Result']
+
     predicates.append(generate_predicate(func_node.name,
                                          pred_args,
                                          code))
@@ -238,14 +286,8 @@ EMPTY_CTOR_DEF = ast.FunctionDef(name='__init__',
                                  decorator_list=[],
                                  returns=None)
 
-def implicit_arg_annotation(class_node):
-    return ast.Call(func=ast.Name(id=class_node.name, ctx=ast.Load()),
-                    args=[],
-                    keywords=[],
-                    starargs=None,
-                    kwargs=None)
 
-class SsaRewriter(ast.NodeTransformer):
+class SsaRewriter(NodeTransformer):
     """
     Rewrites code to use single static assignment form. Also, fixes names of
     classes and functions such that they don't conflict with Prolog builtins.
@@ -255,10 +297,6 @@ class SsaRewriter(ast.NodeTransformer):
     """
     def __init__(self):
         self._locals = {}
-        self._class_has_ctor = False
-        self._current_class_node = None # None => not in class decl
-        # Constructors need some special handling
-        self._currently_translating_constructor = False
 
     def _localvar_index(self, id, locs):
         return int(locs[id][len(id) + 1:])
@@ -280,99 +318,13 @@ class SsaRewriter(ast.NodeTransformer):
         Add the functions arguments to the dict of local variables.
         """
         newarg = self._new_local(node.arg)
-        return ast.copy_location(ast.arg(arg=newarg,
-                                         annotation=node.annotation),
-                                 node)
-
-    def visit_arguments(self, node):
-        """
-        Rewrite the argument list of a function such that it's clear if and
-        argument is an "implicit" argument (the 'self' argument of methods).
-        An Implicit argument is moved to a new attribute of the AST node
-        called 'implicit'. Constructors are modeled by returning a new
-        object, thus, constructors does not have an implicit argument.
-        """
-        implicit = None 
-        unvisited_args = node.args
-        if self._current_class_node is not None:
-            unvisited_args = node.args[1:]
-            if not self._currently_translating_constructor:
-                implicit = self.visit(node.args[0])
-                implicit.annotation = self.visit(implicit_arg_annotation(self._current_class_node))
-        new = ast.arguments(args=[self.visit(a) for a in unvisited_args],
-                            vararg=node.vararg,
-                            varargannotation=node.varargannotation,
-                            kwonlyargs=node.kwonlyargs,
-                            kwarg=node.kwarg,
-                            kwargannotation=node.kwargannotation,
-                            defaults=node.defaults,
-                            kw_defaults=node.kw_defaults)
-        new._fields = new._fields + ('implicit', )
-        new.implicit = implicit
-
-        return ast.copy_location(new, node)
-
-    def _predicate_name_for_function_name(self, node):
-        """
-        Get the prolog name for a python function name, taking into account
-        if the function is part of a class declaration.
-        """
-        if self._current_class_node is not None:
-            if node.name == '__init__':
-                return 'g_' + self._current_class_node.name # ctor name
-            else:
-                return "m_" + node.name #  method name
-        else:
-            return "g_" + node.name # global function
+        return self.copy_node(node, arg=newarg)
 
     def visit_FunctionDef(self, node):
-        """
-        Makes the name of functions not clash with Prolog names by prefixing
-        the function name with 'g_' (read: global_). Also, clears some state
-        needed for translating functions.
-        """
-        if self._current_class_node is not None and node.name == '__init__':
-            self._class_has_ctor = True
-            self._currently_translating_constructor = True
-            constructs = "t_" + self._current_class_node.name
-        else:
-            self._currently_translating_constructor = False
-            constructs = None
-
-        pred_name = self._predicate_name_for_function_name(node)
         self._locals = {} # New function started => clear locals
         args = self.visit(node.args) # Must be visited before the body
         body = [self.visit(stmt) for stmt in node.body]
-        new = ast.FunctionDef(name=pred_name,
-                              args=args,
-                              body=body)
-
-        new.constructs = constructs
-        new._fields = new._fields + ('constructs', )
-        return ast.copy_location(new, node)
-
-    def visit_ClassDef(self, node):
-        """
-        Makes the name of classes not class Prolog names by predicates by
-        prefixing the class name wit a 'g_' (read: global_).
-        Also, add an empty constructor if no one was explicitly defined.
-        """
-        self._class_has_ctor = False # This may be modified when visiting the body
-        self._current_class_node = node
-        body = [self.visit(decl) for decl in node.body]
-        if not self._class_has_ctor:
-            body.append(self.visit(EMPTY_CTOR_DEF))
-        self._current_class_node = None
-        new = ast.ClassDef(name='t_' + node.name,
-                           bases=node.bases,
-                           keywords=node.keywords,
-                           starargs=node.starargs,
-                           kwargs=node.kwargs,
-                           body=body,
-                           decorator_list=node.decorator_list)
-        return ast.copy_location(new, node)
-
-
+        return self.copy_node(node, args=args, body=body)
 
     def visit_If(self, node):
         """
@@ -413,11 +365,8 @@ class SsaRewriter(ast.NodeTransformer):
                     orelse.append(assign)
                 self._locals[var] = out_var
                 outvars.append(out_var)
-        new = ast.If(test=test, body=body, orelse=orelse)
-        new._fields = new._fields + ('outvars', 'invars')
-        new.outvars = outvars
-        new.invars = list(locals_before.values())
-        return ast.copy_location(new, node)
+        return self.copy_node(node, test=test, body=body, orelse=orelse,
+                              outvars=outvars, invars=list(locals_before.values()))
 
     def visit_Name(self, node):
         if node.id == 'free':
@@ -426,40 +375,96 @@ class SsaRewriter(ast.NodeTransformer):
             id = self._new_local(node.id)
         elif node.id in self._locals:
             id = self._locals[node.id]
+        elif node.id == 'self':
+            return ast.Name(id='Self', ctx=ast.Load())
         else:
-            id = "g_" + node.id # Not a local var => global name
-        new = ast.Name(id=id, ctx=node.ctx)
-        return ast.copy_location(new, node)
+            id = node.id # Not a local var => global name
+        return self.copy_node(node, id=id)
+
+    def visit_Assign(self, node):
+        # NOTE: Have 'value' and 'targets' must be visited in this order
+        value = self.visit(node.value)
+        targets = [self.visit(t) for t in node.targets]
+        return self.copy_node(node, targets=targets, value=value)
+
+
+class ConstructorDef(ast.FunctionDef):
+    """
+    Describes the constructor (__init__) of a class.
+    """
+
+def assert_self_type(type_name):
+    """
+    Get the ast for assert the type of 'self'. Implemented as:
+        assert type(self) == type_name
+    """
+    return [ast.Assert(test=ast.Compare(left=ast.Call(func=ast.Name(id='type', ctx=ast.Load()), args=[ast.Name(id='self', ctx=ast.Load())], keywords=[], starargs=None, kwargs=None), ops=[ast.Eq()], comparators=[ast.Name(id=type_name, ctx=ast.Load())]), msg=None)]
+
+class SymbolResolver(NodeTransformer):
+    def __init__(self, globals):
+        self._globals = globals
+        self._current_class_def = None
+        self._class_has_ctor = False
+
+    def visit_Name(self, node):
+        if node.id in self._globals:
+            return self.copy_node(node, id='g_' + node.id)
+        return node
+
+    def visit_FunctionDef(self, node):
+        if self._current_class_def is not None:
+            if node.name == '__init__':
+                self._class_has_ctor = True
+                new_args = self.copy_node(node.args, args=node.args.args[1:])
+                return self.copy_node(node, ConstructorDef,
+                                      name='g_' + self._current_class_def.name,
+                                      args=new_args)
+            else:
+                new_node = self.copy_node(node, name='m_' + node.name)
+                assert_type = self.visit(assert_self_type(self._current_class_def.name))
+                new_node.body =  assert_type + new_node.body
+                return new_node
+        else:
+            return self.copy_node(node, name='g_' + node.name)
+
+    def visit_ClassDef(self, node):
+        self._current_class_def = node
+        attrs = class_attributes(node)
+        self._class_has_ctor = False
+        new_node = self.copy_node(node, name='g_' + node.name, attrs=attrs)
+
+        if not self._class_has_ctor:
+            new_node.body.append(self.visit(EMPTY_CTOR_DEF))
+
+        self._current_class_def = None
+        return new_node
 
     def visit_Call(self, node):
         """
-        Translates call of the type 'object.method(args)' into
-        'method(implicit=object, args)'.
+        Translates call of the type 'object.method(a, b, c, ...)' into
+        'm_method(object, a, b, c, ...)'.
         """
         if type(node.func) == ast.Attribute:
+            self_arg = [self.visit(node.func.value)]
             func = ast.Name(id='m_' + node.func.attr, ctx=ast.Load())
-            implicit = self.visit(node.func.value)
         else:
+            self_arg = []
             func = self.visit(node.func)
-            implicit = None
-        new = ast.Call(func=func,
-                       args=[self.visit(a) for a in node.args],
-                       keywords=node.keywords,
-                       starargs=node.starargs,
-                       kwargs=node.kwargs)
-        new.implicit = implicit
-        new._fields = new._fields + ('implicit', )
-
-        return ast.copy_location(new, node)
-
-    def visit_Assign(self, node):
-        value = self.visit(node.value)
-        targets = [self.visit(t) for t in node.targets]
-        new = ast.Assign(targets=targets, value=value)
-        return ast.copy_location(new, node)
+        return self.copy_node(node, func=func, args=self_arg + node.args)
 
 def ssa_form(parse_tree):
+    """Rewrite functions into static single assignment form"""
     rewriter = SsaRewriter()
+    return rewriter.visit(parse_tree)
+
+def resolve_symbols(parse_tree):
+    """
+    Rename symbols such that they don't collide with prolog builtins. Also,
+    unifies function and methods calls/definintion, such that the only
+    distinctiong is the name (functions always start with 'g_' and method
+    always start with 'm_').
+    """
+    rewriter = SymbolResolver(global_symbols(parse_tree))
     return rewriter.visit(parse_tree)
 
 def global_symbols(parse_tree):
@@ -469,10 +474,11 @@ def global_symbols(parse_tree):
 
 def compile_module(module_code):
     parse_tree = ast.parse(module_code)
-    ssa_tree = ssa_form(parse_tree)
+    parse_tree = resolve_symbols(parse_tree)
+    parse_tree = ssa_form(parse_tree)
 
-    compiler = ModuleTranslator(global_symbols(ssa_tree))
-    compiler.visit(ssa_tree)
+    compiler = ModuleTranslator(global_symbols(parse_tree))
+    compiler.visit(parse_tree)
     return BUILTINS + compiler.code()
 
 def main():
@@ -539,58 +545,58 @@ i_assert(t_bool(1)).
 
 
 i_binadd(L, R, Result) :-
-    m___add__(L, [R], _, Result).
+    m___add__([L, R], _, Result).
 i_binadd(L, R, Result) :-
-    m___radd__(R, [L], _, Result).
+    m___radd__([R, L], _, Result).
 i_binsub(L, R, Result) :-
-    m___sub__(L, [R], _, Result).
+    m___sub__([L, R], _, Result).
 i_binsub(L, R, Result) :-
-    m___rsub__(R, [L], _, Result).
+    m___rsub__([R, L], _, Result).
 i_binmult(L, R, Result) :-
-    m___mul__(L, [R], _, Result).
+    m___mul__([L, R], _, Result).
 i_binmult(L, R, Result) :-
-    m___rmul__(R, [L], _, Result).
+    m___rmul__([R, L], _, Result).
 i_bindiv(L, R, Result) :-
-    m___truediv__(L, [R], _, Result).
+    m___truediv__([L, R], _, Result).
 i_bindiv(L, R, Result) :-
-    m___rtruediv__(R, [L], _, Result).
+    m___rtruediv__([R, L], _, Result).
 i_binfloordiv(L, R, Result) :-
-    m___floordiv__(L, [R], _, Result).
+    m___floordiv__([L, R], _, Result).
 i_binfloordiv(L, R, Result) :-
-    m___rfloordiv__(R, [L], _, Result).
+    m___rfloordiv__([R, L], _, Result).
 i_binmod(L, R, Result) :-
-    m___mod__(L, [R], _, Result).
+    m___mod__([L, R], _, Result).
 i_binmod(L, R, Result) :-
-    m___rmod__(R, [L], _, Result).
+    m___rmod__([R, L], _, Result).
 i_binpow(L, R, Result) :-
-    m___pow__(L, [R], _, Result).
+    m___pow__([L, R], _, Result).
 i_binpow(L, R, Result) :-
-    m___rpow__(R, [L], _, Result).
+    m___rpow__([R, L], _, Result).
 i_binrshift(L, R, Result) :-
-    m___rshift__(L, [R], _, Result).
+    m___rshift__([L, R], _, Result).
 i_binrshift(L, R, Result) :-
-    m___rrshift__(R, [L], _, Result).
+    m___rrshift__([R, L], _, Result).
 i_binlshift(L, R, Result) :-
-    m___lshift__(L, [R], _, Result).
+    m___lshift__([L, R], _, Result).
 i_binlshift(L, R, Result) :-
-    m___rlshift__(R, [L], _, Result).
+    m___rlshift__([R, L], _, Result).
 i_binbitand(L, R, Result) :-
-    m___and__(L, [R], _, Result).
+    m___and__([L, R], _, Result).
 i_binbitand(L, R, Result) :-
-    m___rand__(R, [L], _, Result).
+    m___rand__([R, L], _, Result).
 i_binbitor(L, R, Result) :-
-    m___or__(L, [R], _, Result).
+    m___or__([L, R], _, Result).
 i_binbitor(L, R, Result) :-
-    m___ror__(R, [L], _, Result).
+    m___ror__([R, L], _, Result).
 i_binbitxor(L, R, Result) :-
-    m___xor__(L, [R], _, Result).
+    m___xor__([L, R], _, Result).
 i_binbitxor(L, R, Result) :-
-    m___rxor__(R, [L], _, Result).
+    m___rxor__([R, L], _, Result).
 
 i_unaryusub(I, Result) :-
-    m___neg__(I, [], _, Result).
+    m___neg__([I], _, Result).
 i_unaryinvert(I, Result) :-
-    m___invert__(I, [], _, Result).
+    m___invert__([I], _, Result).
 
 i_compare(ne, t_int(L), t_int(R), t_bool(Result)) :-
     Result #<==> (L #\= R).
@@ -604,63 +610,66 @@ i_compare(gte, t_int(L), t_int(R), t_bool(Result)) :-
     Result #<==> (L #>= R).
 i_compare(lte, t_int(L), t_int(R), t_bool(Result)) :-
     Result #<==> (L #=< R).
+i_compare(eq, O, O, t_bool(1)).
+i_compare(eq, L, R, t_bool(0)) :-
+    L \= R. % TODO: reify unification to boolean result!
 
 i_return(Var, Var).
 
 
-m___add__(t_int(L), [t_int(R)], _Io, t_int(Result)) :-
+m___add__([t_int(L), t_int(R)], _Io, t_int(Result)) :-
     Result #= L + R.
-m___sub__(t_int(L), [t_int(R)], _Io, t_int(Result)) :-
+m___sub__([t_int(L), t_int(R)], _Io, t_int(Result)) :-
     Result #= L - R.
-m___mul__(t_int(L), [t_int(R)], _Io, t_int(Result)) :-
+m___mul__([t_int(L), t_int(R)], _Io, t_int(Result)) :-
     Result #= L * R.
-m___rmul__(t_int(R), [t_int(L)], _Io, t_int(Result)) :-
+m___rmul__([t_int(R), t_int(L)], _Io, t_int(Result)) :-
     Result #= L * R.
-m___floordiv__(t_int(L), [t_int(R)], _Io, t_int(Result)) :-
+m___floordiv__([t_int(L), t_int(R)], _Io, t_int(Result)) :-
     Result #= L / R.
-m___mod__(t_int(L), [t_int(R)], _Io, t_int(Result)) :-
+m___mod__([t_int(L), t_int(R)], _Io, t_int(Result)) :-
     L #< 0, R #< 0, !,
     Result #= -(-L mod -R).
-m___mod__(t_int(L), [t_int(R)], _Io, t_int(Result)) :-
+m___mod__([t_int(L), t_int(R)], _Io, t_int(Result)) :-
     Result #= L mod R.
-m___pow__(t_int(L), [t_int(R)], _Io, t_int(Result)) :-
+m___pow__([t_int(L), t_int(R)], _Io, t_int(Result)) :-
     Result #= L ^ R.
-m___rshift__(t_int(L), [t_int(R)], _Io, t_int(Result)) :-
+m___rshift__([t_int(L), t_int(R)], _Io, t_int(Result)) :-
     Result #= L / (2 ^ R).
-m___lshift__(t_int(L), [t_int(R)], _Io, t_int(Result)) :-
+m___lshift__([t_int(L), t_int(R)], _Io, t_int(Result)) :-
     Result #= L * (2 ^ R).
-m___and__(t_int(L), [t_int(R)], _Io, t_int(Result)) :-
+m___and__([t_int(L), t_int(R)], _Io, t_int(Result)) :-
     no_sign(L, Ls),
     no_sign(R, Rs),
     {int_and_body},
     fix_sign(UnsignedResult, Result).
-m___rand__(t_int(R), [t_int(L)], _Io, t_int(Result)) :-
+m___rand__([t_int(R), t_int(L)], _Io, t_int(Result)) :-
     no_sign(L, Ls),
     no_sign(R, Rs),
     {int_and_body},
     fix_sign(UnsignedResult, Result).
-m___or__(t_int(L), [t_int(R)], _Io, t_int(Result)) :-
+m___or__([t_int(L), t_int(R)], _Io, t_int(Result)) :-
     no_sign(L, Ls),
     no_sign(R, Rs),
     {int_or_body},
     fix_sign(UnsignedResult, Result).
-m___ror__(t_int(R), [t_int(L)], _Io, t_int(Result)) :-
+m___ror__([t_int(R), t_int(L)], _Io, t_int(Result)) :-
     no_sign(L, Ls),
     no_sign(R, Rs),
     {int_or_body},
     fix_sign(UnsignedResult, Result).
-m___xor__(t_int(L), [t_int(R)], _Io, t_int(Result)) :-
+m___xor__([t_int(L), t_int(R)], _Io, t_int(Result)) :-
     no_sign(L, Ls),
     no_sign(R, Rs),
     {int_xor_body},
     fix_sign(UnsignedResult, Result).
-m___rxor__(t_int(R), [t_int(L)], _Io, t_int(Result)) :-
+m___rxor__([t_int(R), t_int(L)], _Io, t_int(Result)) :-
     no_sign(L, Ls),
     no_sign(R, Rs),
     {int_xor_body},
     fix_sign(UnsignedResult, Result).
-m___neg__(t_int(I), [], _Io, t_int(-I)).
-m___invert__(t_int(I), [], _Io, t_int(Result)) :-
+m___neg__([t_int(I)], _Io, t_int(-I)).
+m___invert__([t_int(I)], _Io, t_int(Result)) :-
     Result #= -I -1.
 
 
@@ -694,6 +703,9 @@ g_repr(t_int(_), t_str("?int")).
 
 g_str(Object, Str) :-
     g_repr(Object, Str).
+
+
+g_type([t_object(Type, _Attrs, _Ref)], _Io, Type).
 
 
 io_write([]).
