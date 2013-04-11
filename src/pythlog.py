@@ -16,6 +16,11 @@ class FindGlobalSymbols(ast.NodeVisitor):
     def visit_ClassDef(self, node):
         self._symbols.add(node.name)
 
+def global_symbols(parse_tree):
+    symbol_finder = FindGlobalSymbols()
+    symbol_finder.visit(parse_tree)
+    return symbol_finder.global_symbols()
+
 class FindClassAttributes(ast.NodeVisitor):
     def __init__(self):
         self._attrs = set()
@@ -72,6 +77,100 @@ class NodeTransformer(ast.NodeTransformer):
         return ast.copy_location(new_node, old_node)
     
 
+class NodeVisitor(ast.NodeVisitor):
+    def visit(self, node):
+        """
+        Like the ast.NodeVisitor.visit function except for the natural
+        extension of handling list.
+        """
+        if type(node) == list:
+            newlist = []
+            for n in node:
+                res = self.visit(n)
+                if type(res) in (list, tuple):
+                    newlist.extend(res)
+                else:
+                    newlist.append(res)
+            return newlist
+        elif type(node) not in (type(None), str):
+            return ast.NodeTransformer.visit(self, node)
+
+
+class PrettyPrinter(NodeVisitor):
+    def __init__(self):
+        self._lines = []
+        self._indent_level = 0
+
+    def text(self, tree):
+        self.visit(tree)
+        return "\n".join(self._lines)
+
+    def _line(self, text):
+        self._lines.append(("  " * self._indent_level) + text)
+
+    def _indent(self):
+        self._indent_level += 1
+
+    def _deindent(self):
+        self._indent_level -= 1
+
+    def visit_Num(self, node):
+        return str(node.n)
+
+    def visit_Name(self, node):
+        return node.id
+
+    def visit_Compare(self, node):
+        assert len(node.ops) == 1
+        assert len(node.comparators) == 1
+        op = {'Eq':'==', 'GtE':'>='}[type(node.ops[0]).__name__]
+        lhs = self.visit(node.left)
+        rhs = self.visit(node.comparators[0])
+        return "%s %s %s" % (lhs, op, rhs)
+
+    def visit_Pass(self, node):
+        self._line("pass")
+
+    def visit_Assign(self, node):
+        targets = ", ".join(self.visit(t) for t in node.targets)
+        value = self.visit(node.value)
+        self._line("%s = %s" % (targets, value))
+
+    def visit_Return(self, node):
+        self._line('return %s' % self.visit(node.value))
+
+    def visit_Assert(self, node):
+        self._line('assert %s' % self.visit(node.test))
+
+    def visit_FunctionDef(self, node):
+        arglist = ", ".join(a.arg for a in node.args.args)
+        self._line('def %s(%s):' % (node.name, arglist))
+        self._indent()
+        self.visit(node.body)
+        self._deindent()
+        self._line('')
+
+    def visit_If(self, node):
+        test = self.visit(node.test)
+        self._line('if %s:' % test)
+        self._indent()
+        if len(node.body) == 0:
+            self._line('pass')
+        else:
+            self.visit(node.body)
+        self._deindent()
+        if len(node.orelse) > 0:
+            self._line('else:')
+            self._indent()
+            self.visit(node.orelse)
+            self._deindent()
+
+
+def prettyprint(node):
+    """Print an AST node as Python code."""
+    return PrettyPrinter().text(node)
+
+
 class Allocator:
     def __init__(self):
         self._counter = 0
@@ -115,11 +214,9 @@ class StatementTranslator(ast.NodeVisitor):
         self._globals = globals
         self._predicates = []
         self._code = []
-        self._code_prefix = ['(true']
-        self._code_suffix = ['true)']
 
     def code(self):
-        return self._code_prefix + self._code + self._code_suffix
+        return self._code
 
     def predicates(self):
         """Get any additional predicates created while translating the
@@ -174,7 +271,7 @@ class StatementTranslator(ast.NodeVisitor):
         return self._code
 
     def visit_Assign(self, node):
-        assert len(node.targets) == 1
+        assert len(node.targets) == 1, ast.dump(node)
         value = self.visit(node.value)
         if type(node.targets[0]) == ast.Name:
             target = self.visit(node.targets[0])
@@ -189,7 +286,7 @@ class StatementTranslator(ast.NodeVisitor):
 
     def visit_Return(self, node):
         value = self.visit(node.value)
-        self._code.append('i_return(Result, %s), DidReturn = 1' % value)
+        self._code.append('i_return(Result, %s)' % value)
         return self._code
 
     def visit_Expr(self, node):
@@ -197,7 +294,6 @@ class StatementTranslator(ast.NodeVisitor):
         return self._code
 
     def visit_If(self, node):
-        self._code_prefix = ['(true']
         test = self.visit(node.test)
 
         st = StatementTranslator(self._allocator, self._globals)
@@ -212,9 +308,8 @@ class StatementTranslator(ast.NodeVisitor):
         orelse = st.code()
         self._predicates.extend(st.predicates())
 
-
         name = self._allocator.globalsym()
-        args = node.invars + node.outvars + ['Io', 'Result', 'DidReturn']
+        args = node.invars + node.outvars + ['Io']
 
         self._predicates.append(generate_predicate(name,
                                                    ['t_bool(1)'] + args,
@@ -223,9 +318,6 @@ class StatementTranslator(ast.NodeVisitor):
                                                    ['t_bool(0)'] + args,
                                                    orelse))
         self._code.append('%s(%s, %s)' % (name, test, ", ".join(args)))
-        self._code.extend(self._code_suffix)
-        self._code.append('((DidReturn \= 1)-> (true')
-        self._code_suffix = ['true); true)']
         return self._code
 
 def generate_predicate(name, args, body):
@@ -289,11 +381,7 @@ EMPTY_CTOR_DEF = ast.FunctionDef(name='__init__',
 
 class SsaRewriter(NodeTransformer):
     """
-    Rewrites code to use single static assignment form. Also, fixes names of
-    classes and functions such that they don't conflict with Prolog builtins.
-
-    Furthermore, some irregularities are rewritten into a canonical form, such
-    as not all classes having an explicit constructor.
+    Rewrites code to use single static assignment form.
     """
     def __init__(self):
         self._locals = {}
@@ -401,6 +489,14 @@ def assert_self_type(type_name):
     return [ast.Assert(test=ast.Compare(left=ast.Call(func=ast.Name(id='type', ctx=ast.Load()), args=[ast.Name(id='self', ctx=ast.Load())], keywords=[], starargs=None, kwargs=None), ops=[ast.Eq()], comparators=[ast.Name(id=type_name, ctx=ast.Load())]), msg=None)]
 
 class SymbolResolver(NodeTransformer):
+    """
+    Fixes names of classes and functions such that they don't conflict
+    with Prolog builtins. Method calls are rewritten into normal function calls,
+    and an 'assert type(self) == CorrectType' is added to method bodies. 
+
+    Furthermore, some irregularities are rewritten into a canonical form, such
+    as not all classes having an explicit constructor.
+    """
     def __init__(self, globals):
         self._globals = globals
         self._current_class_def = None
@@ -452,30 +548,95 @@ class SymbolResolver(NodeTransformer):
             func = self.visit(node.func)
         return self.copy_node(node, func=func, args=self_arg + node.args)
 
+class SingleReturnRewriter(NodeTransformer):
+    def __init__(self):
+        self._return_seen = False
+
+    def visit_stmts(self, node):
+        uncond = []
+        cond = []
+        add_to = uncond
+        for n in node:
+            res = self.visit(n)
+            if type(res) in (list, tuple):
+                add_to.extend(res)
+            else:
+                add_to.append(res)
+            if type(n) == ast.If:
+                add_to = cond
+
+        if len(cond) > 0:
+            uncond.append(ast.If(test=ast.Compare(left=ast.Name(id='0has_returned', ctx=ast.Load()), ops=[ast.Eq()], comparators=[ast.Num(n=0)]), body=cond, orelse=[]))
+        return uncond
+
+    def visit_Return(self, node):
+        self._return_seen = True
+        return [ast.Assign(targets=[ast.Name(id='0return', ctx=ast.Store())], value=node.value),
+                ast.Assign(targets=[ast.Name(id='0has_returned', ctx=ast.Store())], value=ast.Num(n=1))]
+
+    def visit_If(self, node):
+        return self.copy_node(node,
+                              body=self.visit_stmts(node.body),
+                              orelse=self.visit_stmts(node.orelse))
+
+    def visit_FunctionDef(self, node):
+        self._return_seen = False
+
+        body = [ast.Assign(targets=[ast.Name(id='0has_returned', ctx=ast.Store())], value=ast.Num(n=0))]
+        body.extend(self.visit_stmts(node.body))
+
+        if self._return_seen:
+            return_stmt = [ast.Return(value=ast.Name(id='0return', ctx=ast.Load()))]
+        else:
+            return_stmt = [ast.Return(value=ast.Name(id='g_None', ctx=ast.Load()))]
+
+
+        new = self.copy_node(node, body=body + return_stmt)
+        return new
+
 def ssa_form(parse_tree):
     """Rewrite functions into static single assignment form"""
-    rewriter = SsaRewriter()
-    return rewriter.visit(parse_tree)
+    return SsaRewriter().visit(parse_tree)
 
-def resolve_symbols(parse_tree):
+def resolve_global_symbols(parse_tree):
     """
     Rename symbols such that they don't collide with prolog builtins. Also,
     unifies function and methods calls/definintion, such that the only
     distinctiong is the name (functions always start with 'g_' and method
     always start with 'm_').
     """
-    rewriter = SymbolResolver(global_symbols(parse_tree))
-    return rewriter.visit(parse_tree)
+    return SymbolResolver(global_symbols(parse_tree)).visit(parse_tree)
 
-def global_symbols(parse_tree):
-    symbol_finder = FindGlobalSymbols()
-    symbol_finder.visit(parse_tree)
-    return symbol_finder.global_symbols()
+def single_return_point(parse_tree):
+    """
+    Rewrites functions with multiple return statements to only having one
+    return statement by adding if:s and a new boolean variable saying if any
+    more statements should be executed (if the function is "done"). Example:
+        def foo(a):
+            if a == 1:
+                return 0
+            return 1
+    is rewritten to:
+        def foo(a):
+            has_returned = 0
+            if a == 1:
+                has_returned = 1
+                return_value = 0
+            if has_returned == 0:
+                has_returned = 1
+                return_value = 1
+            return return_value
+    This rewrite is necessary as Prolog do not have early exists from predicates.
+    """
+    return SingleReturnRewriter().visit(parse_tree)
 
 def compile_module(module_code):
     parse_tree = ast.parse(module_code)
-    parse_tree = resolve_symbols(parse_tree)
+    parse_tree = resolve_global_symbols(parse_tree)
+    print(prettyprint(parse_tree))
+    parse_tree = single_return_point(parse_tree)
     parse_tree = ssa_form(parse_tree)
+    print(prettyprint(parse_tree))
 
     compiler = ModuleTranslator(global_symbols(parse_tree))
     compiler.visit(parse_tree)
