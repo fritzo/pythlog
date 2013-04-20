@@ -513,6 +513,14 @@ def assign_undefinded(var_name):
     return ast.Assign(targets=[ast.Name(id=var_name, ctx=ast.Store())], value=ast.Name(id='uninitialized', ctx=ast.Load()))
 
 class SymbolResolver(NodeTransformer):
+    """
+    Fixes names of classes and functions such that they don't conflict
+    with Prolog builtins. Method calls are rewritten into normal function calls,
+    and an 'assert type(self) == CorrectType' is added to method bodies. 
+
+    Furthermore, some irregularities are rewritten into a canonical form, such
+    as not all classes having an explicit constructor.
+    """
     def __init__(self, globals):
         self._globals = globals
         self._current_class_def = None
@@ -671,6 +679,7 @@ def single_return_point(parse_tree):
 def compile_module(module_code):
     parse_tree = ast.parse(module_code)
     parse_tree = resolve_global_symbols(parse_tree)
+#    print(prettyprint(parse_tree))
     parse_tree = single_return_point(parse_tree)
     #print(prettyprint(parse_tree))
     parse_tree = ssa_form(parse_tree)
