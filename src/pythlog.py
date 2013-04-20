@@ -53,9 +53,11 @@ class NodeTransformer(ast.NodeTransformer):
         if node is None:
             return node
         elif type(node) == list:
-            return [ast.NodeTransformer.visit(self, n) for n in node]
+            return [self.visit(n) for n in node]
         elif type(node) == str:
             return node
+        elif type(node) == set:
+            return {self.visit(n) for n in node}
         else:
             return ast.NodeTransformer.visit(self, node)
 
@@ -123,10 +125,13 @@ class PrettyPrinter(NodeVisitor):
     def visit_Compare(self, node):
         assert len(node.ops) == 1
         assert len(node.comparators) == 1
-        op = {'Eq':'==', 'GtE':'>='}[type(node.ops[0]).__name__]
+        op = {'Eq':'==', 'GtE':'>=', 'NotEq':'!='}[type(node.ops[0]).__name__]
         lhs = self.visit(node.left)
         rhs = self.visit(node.comparators[0])
         return "%s %s %s" % (lhs, op, rhs)
+
+    def visit_BinOp(self, node):
+        return "binop"
 
     def visit_Pass(self, node):
         self._line("pass")
@@ -135,6 +140,15 @@ class PrettyPrinter(NodeVisitor):
         targets = ", ".join(self.visit(t) for t in node.targets)
         value = self.visit(node.value)
         self._line("%s = %s" % (targets, value))
+
+    def visit_Expr(self, node):
+        self._line(self.visit(node.value))
+
+    def visit_Call(self, node):
+        print(ast.dump(node))
+        args = ", ".join(self.visit(a) for a in node.args)
+        func = self.visit(node.func)
+        return "%s(%s)" % (func, args)
 
     def visit_Return(self, node):
         self._line('return %s' % self.visit(node.value))
@@ -253,7 +267,7 @@ class StatementTranslator(ast.NodeVisitor):
         lhs = self.visit(node.left)
         rhs = self.visit(node.comparators[0])
         result = self._allocator.tempvar()
-        self._code.append('i_compare(%s, %s, %s, %s)' % (op, lhs, rhs, result))
+        self._code.append('i_cmp%s(%s, %s, %s)' % (op, lhs, rhs, result))
         return result
 
     def visit_Call(self, node):
@@ -378,6 +392,10 @@ EMPTY_CTOR_DEF = ast.FunctionDef(name='__init__',
                                  decorator_list=[],
                                  returns=None)
 
+def maxmin(x, y):
+    if x > y:
+        return x, y
+    return y, x
 
 class SsaRewriter(NodeTransformer):
     """
@@ -423,38 +441,40 @@ class SsaRewriter(NodeTransformer):
         """
         # TODO: Horrible mess of code... rewrite!
         test = self.visit(node.test)
+
         locals_before = self._locals.copy()
         body = [self.visit(stmt) for stmt in node.body]
         locals_after_body = self._locals.copy()
+
         self._locals = locals_before.copy()
         orelse = [self.visit(stmt) for stmt in node.orelse]
         locals_after_orelse = self._locals.copy()
+        self._locals = locals_before.copy()
 
         all_vars = set(locals_after_body.keys()).union(set(locals_after_orelse.keys()))
-        self._locals = locals_before.copy()
         outvars = []
         for var in all_vars:
-            if (var not in locals_before and
-                var in locals_after_body and
-                var in locals_after_body): # Var added in both branches
-                body_idx = self._localvar_index(var, locals_after_body)
-                orelse_idx = self._localvar_index(var, locals_after_orelse)
-                if body_idx > orelse_idx:
-                    max_idx, not_max_idx = body_idx, orelse_idx
-                else:
-                    max_idx, not_max_idx = orelse_idx, body_idx
-                out_var = self._localvar_name(var, max_idx)
-                in_var = self._localvar_name(var, not_max_idx)
-                assign = ast.Assign(targets=[ast.Name(id=out_var, ctx=ast.Store())],
-                                    value=ast.Name(id=in_var, ctx=ast.Load()))
-                if max_idx > body_idx:
-                    body.append(assign)
-                elif max_idx > orelse_idx:
-                    orelse.append(assign)
-                self._locals[var] = out_var
-                outvars.append(out_var)
-        return self.copy_node(node, test=test, body=body, orelse=orelse,
-                              outvars=outvars, invars=list(locals_before.values()))
+            body_idx = self._localvar_index(var, locals_after_body)
+            orelse_idx = self._localvar_index(var, locals_after_orelse)
+            max_idx, min_idx = maxmin(body_idx, orelse_idx)
+
+            out_var = self._localvar_name(var, max_idx)
+            in_var = self._localvar_name(var, min_idx)
+            assign = ast.Assign(targets=[ast.Name(id=out_var, ctx=ast.Store())],
+                                value=ast.Name(id=in_var, ctx=ast.Load()))
+            if max_idx > body_idx:
+                body.append(assign)
+            elif max_idx > orelse_idx:
+                orelse.append(assign)
+            self._locals[var] = out_var
+            outvars.append(out_var)
+
+        return self.copy_node(node,
+                              test=test,
+                              body=body,
+                              orelse=orelse,
+                              outvars=outvars,
+                              invars=list(locals_before.values()))
 
     def visit_Name(self, node):
         if node.id == 'free':
@@ -488,40 +508,47 @@ def assert_self_type(type_name):
     """
     return [ast.Assert(test=ast.Compare(left=ast.Call(func=ast.Name(id='type', ctx=ast.Load()), args=[ast.Name(id='self', ctx=ast.Load())], keywords=[], starargs=None, kwargs=None), ops=[ast.Eq()], comparators=[ast.Name(id=type_name, ctx=ast.Load())]), msg=None)]
 
-class SymbolResolver(NodeTransformer):
-    """
-    Fixes names of classes and functions such that they don't conflict
-    with Prolog builtins. Method calls are rewritten into normal function calls,
-    and an 'assert type(self) == CorrectType' is added to method bodies. 
 
-    Furthermore, some irregularities are rewritten into a canonical form, such
-    as not all classes having an explicit constructor.
-    """
+def assign_undefinded(var_name):
+    return ast.Assign(targets=[ast.Name(id=var_name, ctx=ast.Store())], value=ast.Name(id='uninitialized', ctx=ast.Load()))
+
+class SymbolResolver(NodeTransformer):
     def __init__(self, globals):
         self._globals = globals
         self._current_class_def = None
         self._class_has_ctor = False
+        self._locals_and_args = set()
 
     def visit_Name(self, node):
         if node.id in self._globals:
             return self.copy_node(node, id='g_' + node.id)
+
+        self._locals_and_args.add(node.id)
         return node
 
     def visit_FunctionDef(self, node):
+        self._locals_and_args = set()
+        visited_body = self.visit(node.body) # Populates self._locals_and_args
+        local_vars = self._locals_and_args - set(a.arg for a in node.args.args) - {'free'}
+        var_inits = [assign_undefinded(v) for v in local_vars]
+        body = var_inits + visited_body
         if self._current_class_def is not None:
             if node.name == '__init__':
                 self._class_has_ctor = True
                 new_args = self.copy_node(node.args, args=node.args.args[1:])
                 return self.copy_node(node, ConstructorDef,
                                       name='g_' + self._current_class_def.name,
-                                      args=new_args)
+                                      args=new_args,
+                                      body=body)
             else:
-                new_node = self.copy_node(node, name='m_' + node.name)
                 assert_type = self.visit(assert_self_type(self._current_class_def.name))
-                new_node.body =  assert_type + new_node.body
-                return new_node
+                return self.copy_node(node,
+                                      name='m_' + node.name,
+                                      body=assert_type + body)
         else:
-            return self.copy_node(node, name='g_' + node.name)
+            return self.copy_node(node,
+                                  name='g_' + node.name,
+                                  body=body)
 
     def visit_ClassDef(self, node):
         self._current_class_def = node
@@ -582,7 +609,8 @@ class SingleReturnRewriter(NodeTransformer):
     def visit_FunctionDef(self, node):
         self._return_seen = False
 
-        body = [ast.Assign(targets=[ast.Name(id='0has_returned', ctx=ast.Store())], value=ast.Num(n=0))]
+        body = [ast.Assign(targets=[ast.Name(id='0has_returned', ctx=ast.Store())], value=ast.Num(n=0)),
+                ast.Assign(targets=[ast.Name(id='0return', ctx=ast.Store())], value=ast.Name(id='uninitialized', ctx=ast.Load()))]
         body.extend(self.visit_stmts(node.body))
 
         if self._return_seen:
@@ -600,10 +628,20 @@ def ssa_form(parse_tree):
 
 def resolve_global_symbols(parse_tree):
     """
-    Rename symbols such that they don't collide with prolog builtins. Also,
-    unifies function and methods calls/definintion, such that the only
+    Rename classes and functions such that they don't conflict with prolog
+    builtins.
+
+    Also, unifies function and methods calls/definintion, such that the only
     distinctiong is the name (functions always start with 'g_' and method
-    always start with 'm_').
+    always start with 'm_'). Method calls are rewritten into normal function
+    calls, and an 'assert type(self) == CorrectType' is added to method
+    bodies.
+
+    Furthermore, some irregularities are rewritten into a canonical form, such
+    as not all classes having an explicit constructor.
+
+    This stage also introduces a new attribute of the FunctionDef node,
+    'locals', that is the set of local variables used by the function body.
     """
     return SymbolResolver(global_symbols(parse_tree)).visit(parse_tree)
 
@@ -633,10 +671,10 @@ def single_return_point(parse_tree):
 def compile_module(module_code):
     parse_tree = ast.parse(module_code)
     parse_tree = resolve_global_symbols(parse_tree)
-    print(prettyprint(parse_tree))
     parse_tree = single_return_point(parse_tree)
+    #print(prettyprint(parse_tree))
     parse_tree = ssa_form(parse_tree)
-    print(prettyprint(parse_tree))
+    #print(prettyprint(parse_tree))
 
     compiler = ModuleTranslator(global_symbols(parse_tree))
     compiler.visit(parse_tree)
@@ -759,21 +797,23 @@ i_unaryusub(I, Result) :-
 i_unaryinvert(I, Result) :-
     m___invert__([I], _, Result).
 
-i_compare(ne, t_int(L), t_int(R), t_bool(Result)) :-
+i_cmpne(t_int(L), t_int(R), t_bool(Result)) :-
     Result #<==> (L #\= R).
-i_compare(eq, t_int(L), t_int(R), t_bool(Result)) :-
+i_cmpeq(t_int(L), t_int(R), t_bool(Result)) :-
     Result #<==> (L #= R).
-i_compare(lt, t_int(L), t_int(R), t_bool(Result)) :-
-    Result #<==> (L #< R).
-i_compare(gt, t_int(L), t_int(R), t_bool(Result)) :-
-    Result #<==> (L #> R).
-i_compare(gte, t_int(L), t_int(R), t_bool(Result)) :-
-    Result #<==> (L #>= R).
-i_compare(lte, t_int(L), t_int(R), t_bool(Result)) :-
-    Result #<==> (L #=< R).
-i_compare(eq, O, O, t_bool(1)).
-i_compare(eq, L, R, t_bool(0)) :-
+i_cmpeq(O, O, t_bool(1)).
+i_cmpeq(L, R, t_bool(0)) :-
     L \= R. % TODO: reify unification to boolean result!
+i_cmpnoteq(t_int(L), t_int(R), t_bool(Result)) :-
+    Result #<==> (L #\= R).
+i_cmplt(t_int(L), t_int(R), t_bool(Result)) :-
+    Result #<==> (L #< R).
+i_cmpgt(t_int(L), t_int(R), t_bool(Result)) :-
+    Result #<==> (L #> R).
+i_cmpgte(t_int(L), t_int(R), t_bool(Result)) :-
+    Result #<==> (L #>= R).
+i_cmplte(t_int(L), t_int(R), t_bool(Result)) :-
+    Result #<==> (L #=< R).
 
 i_return(Var, Var).
 
