@@ -21,26 +21,6 @@ def global_symbols(parse_tree):
     symbol_finder.visit(parse_tree)
     return symbol_finder.global_symbols()
 
-class FindClassAttributes(ast.NodeVisitor):
-    def __init__(self):
-        self._attrs = set()
-
-    def attributes(self):
-        return self._attrs
-
-    def visit_Attribute(self, node):
-        if type(node.value) == ast.Name and node.value.id == 'self':
-            self._attrs.add(node.attr)
-
-def class_attributes(class_node):
-    """
-    Get all attributes of a class. Returns a set of str:s.
-    """
-    visitor = FindClassAttributes()
-    visitor.visit(class_node)
-    return visitor.attributes()
-
-
 class NodeTransformer(ast.NodeTransformer):
     """
     Base class with some convinience methods for instanciating nodes.
@@ -145,7 +125,6 @@ class PrettyPrinter(NodeVisitor):
         self._line(self.visit(node.value))
 
     def visit_Call(self, node):
-        print(ast.dump(node))
         args = ", ".join(self.visit(a) for a in node.args)
         func = self.visit(node.func)
         return "%s(%s)" % (func, args)
@@ -244,6 +223,11 @@ class StatementTranslator(ast.NodeVisitor):
     def visit_Num(self, node):
         return "t_int(%s)" % node.n
 
+    def visit_NewObject(self, node):
+        args = ", ".join("'%s'=%s" % (attr, self.visit(arg))
+                         for (attr, arg) in zip(node.attrs, node.args))
+        return "t_object(%s, [%s], _)" % (node.type, args)
+
     def visit_UnaryOp(self, node):
         operand = self.visit(node.operand)
         op = type(node.op).__name__.lower()
@@ -251,6 +235,11 @@ class StatementTranslator(ast.NodeVisitor):
         self._code.append('i_unary%s(%s, %s)' % (op, operand, result))
         return result
 
+    def visit_Attribute(self, node):
+        result = self._allocator.tempvar()
+        value = self.visit(node.value)
+        self._code.append("i_getattr(%s, '%s', %s)" % (value, node.attr, result))
+        return result
 
     def visit_BinOp(self, node):
         lhs = self.visit(node.left)
@@ -293,7 +282,7 @@ class StatementTranslator(ast.NodeVisitor):
         elif type(node.targets[0]) == ast.Attribute:
             target = self.visit(node.targets[0].value)
             attr = node.targets[0].attr
-            self._code.append('i_setattr(%s, %s, %s)' % (target, attr, value))    
+            self._code.append("i_setattr(%s, '%s', %s)" % (target, attr, value))    
         else:
             assert False
         return self._code
@@ -391,6 +380,14 @@ EMPTY_CTOR_DEF = ast.FunctionDef(name='__init__',
                                  body=[ast.Pass()],
                                  decorator_list=[],
                                  returns=None)
+
+class NewObject(ast.expr):
+    """
+    Represents the ast for constructing a new object. 
+    """
+    def __init__(self, type, attrs, args):
+        ast.expr.__init__(self, type=type, attrs=attrs, args=args)
+        self._fields = ('type', 'attrs', 'args')
 
 def maxmin(x, y):
     if x > y:
@@ -490,16 +487,11 @@ class SsaRewriter(NodeTransformer):
         return self.copy_node(node, id=id)
 
     def visit_Assign(self, node):
-        # NOTE: Have 'value' and 'targets' must be visited in this order
+        # NOTE: 'value' and 'targets' must be visited in this order due to
+        # side-effects
         value = self.visit(node.value)
         targets = [self.visit(t) for t in node.targets]
         return self.copy_node(node, targets=targets, value=value)
-
-
-class ConstructorDef(ast.FunctionDef):
-    """
-    Describes the constructor (__init__) of a class.
-    """
 
 def assert_self_type(type_name):
     """
@@ -509,8 +501,31 @@ def assert_self_type(type_name):
     return [ast.Assert(test=ast.Compare(left=ast.Call(func=ast.Name(id='type', ctx=ast.Load()), args=[ast.Name(id='self', ctx=ast.Load())], keywords=[], starargs=None, kwargs=None), ops=[ast.Eq()], comparators=[ast.Name(id=type_name, ctx=ast.Load())]), msg=None)]
 
 
-def assign_undefinded(var_name):
+def assign_uninitialized(var_name):
+    """
+    Get the ast for assigning 'var_name' to 'uninitialized. Implemented as:
+        var_name = uninitialized
+    """
     return ast.Assign(targets=[ast.Name(id=var_name, ctx=ast.Store())], value=ast.Name(id='uninitialized', ctx=ast.Load()))
+
+def assignment(var_name, value):
+    """
+    Get the ast for assigning 'var_name' to 'value.
+    """
+    return ast.Assign(targets=[ast.Name(id=var_name, ctx=ast.Store())], value=value)
+
+def mangle_attrname(name):
+    return '1' + name
+
+def ctor_return_stmt(class_name, class_attrs):
+    """
+    Get the ast for the return statement used when translating constructor
+    into normal function.
+    """ 
+    args = [ast.Name(id=mangle_attrname(a), ctx=ast.Load()) for a in class_attrs]
+    return ast.Return(value=NewObject(type=class_name,
+                                      attrs=list(class_attrs),
+                                      args=args))
 
 class SymbolResolver(NodeTransformer):
     """
@@ -526,6 +541,8 @@ class SymbolResolver(NodeTransformer):
         self._current_class_def = None
         self._class_has_ctor = False
         self._locals_and_args = set()
+        self._in_ctor = False
+        self._class_attrs = set()
 
     def visit_Name(self, node):
         if node.id in self._globals:
@@ -534,20 +551,37 @@ class SymbolResolver(NodeTransformer):
         self._locals_and_args.add(node.id)
         return node
 
+    def visit_Assign(self, node):
+        if not self._in_ctor:
+            return self.copy_node(node)
+
+        assert(len(node.targets) == 1)
+        target = node.targets[0]
+        if (type(target) == ast.Attribute and
+            type(target.value) == ast.Name and
+            target.value.id == 'self'):
+            self._class_attrs.add(target.attr)
+            return assignment(mangle_attrname(target.attr), node.value)
+        return self.copy_node(node)
+
     def visit_FunctionDef(self, node):
         self._locals_and_args = set()
-        visited_body = self.visit(node.body) # Populates self._locals_and_args
+        self._class_attrs = set()
+        self._in_ctor = self._current_class_def is not None and node.name == '__init__'
+        self._class_has_ctor |= self._in_ctor
+
+        visited_body = self.visit(node.body) # Populates self._locals_and_args and (potentially) self._class_attrs
         local_vars = self._locals_and_args - set(a.arg for a in node.args.args) - {'free'}
-        var_inits = [assign_undefinded(v) for v in local_vars]
+        var_inits = [assign_uninitialized(v) for v in local_vars]
         body = var_inits + visited_body
         if self._current_class_def is not None:
             if node.name == '__init__':
-                self._class_has_ctor = True
                 new_args = self.copy_node(node.args, args=node.args.args[1:])
-                return self.copy_node(node, ConstructorDef,
-                                      name='g_' + self._current_class_def.name,
+                name = 'g_' + self._current_class_def.name
+                return self.copy_node(node,
+                                      name=name,
                                       args=new_args,
-                                      body=body)
+                                      body=body + [ctor_return_stmt(name, self._class_attrs)])
             else:
                 assert_type = self.visit(assert_self_type(self._current_class_def.name))
                 return self.copy_node(node,
@@ -560,9 +594,8 @@ class SymbolResolver(NodeTransformer):
 
     def visit_ClassDef(self, node):
         self._current_class_def = node
-        attrs = class_attributes(node)
         self._class_has_ctor = False
-        new_node = self.copy_node(node, name='g_' + node.name, attrs=attrs)
+        new_node = self.copy_node(node, name='g_' + node.name, attrs=self._class_attrs)
 
         if not self._class_has_ctor:
             new_node.body.append(self.visit(EMPTY_CTOR_DEF))
@@ -639,17 +672,15 @@ def resolve_global_symbols(parse_tree):
     Rename classes and functions such that they don't conflict with prolog
     builtins.
 
-    Also, unifies function and methods calls/definintion, such that the only
-    distinctiong is the name (functions always start with 'g_' and method
-    always start with 'm_'). Method calls are rewritten into normal function
-    calls, and an 'assert type(self) == CorrectType' is added to method
-    bodies.
+    Also, unifies function and methods (including constructors/__init__)
+    calls/definintion, such that the only distinctiong is the name (functions
+    always start with 'g_', method always start with 'm_', and the name of
+    constructor is the name of the class). Method calls are rewritten into
+    normal function calls, and an 'assert type(self) == CorrectType' is added
+    to method bodies.
 
     Furthermore, some irregularities are rewritten into a canonical form, such
     as not all classes having an explicit constructor.
-
-    This stage also introduces a new attribute of the FunctionDef node,
-    'locals', that is the set of local variables used by the function body.
     """
     return SymbolResolver(global_symbols(parse_tree)).visit(parse_tree)
 
@@ -672,7 +703,8 @@ def single_return_point(parse_tree):
                 has_returned = 1
                 return_value = 1
             return return_value
-    This rewrite is necessary as Prolog do not have early exists from predicates.
+    This rewrite is necessary as Prolog do not have early exists from
+    predicates.
     """
     return SingleReturnRewriter().visit(parse_tree)
 
@@ -826,6 +858,23 @@ i_cmplte(t_int(L), t_int(R), t_bool(Result)) :-
 
 i_return(Var, Var).
 
+% TODO: Representing __dict__ like a list of key=value-pair is bad for performance.
+i_getattr(t_object(_Type, Attrs, _Ref), Attr, Value) :-
+    nth0(_, Attrs, Attr=Value), !.
+
+i_setattr(Object, Attr, Value) :-
+    Object = t_object(_Type, Attrs, _Ref),
+    update_attr(0, Attr, Value, Attrs, NewAttrs),
+    setarg(2, Object, NewAttrs).
+
+update_attr(1, _, _, [], []).
+update_attr(0, Name, Value, [], [Name=Value]).
+update_attr(IsAssigned, Name, Value, [AttrName=AttrValue|Attrs], [AttrName=UpdatedValue|NewAttrs]) :-
+    (Name == AttrName ->
+        (UpdatedValue=Value, NextIsAssigned = 1) ;
+        (UpdatedValue=AttrValue, NextIsAssigned = IsAssigned)
+    ),
+    update_attr(NextIsAssigned, Name, Value, Attrs, NewAttrs).
 
 m___add__([t_int(L), t_int(R)], _Io, t_int(Result)) :-
     Result #= L + R.
