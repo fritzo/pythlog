@@ -297,6 +297,7 @@ class StatementTranslator(ast.NodeVisitor):
         return self._code
 
     def visit_If(self, node):
+        # TODO: Move the translation from if to predicate dispatch to a rewrite stage.
         test = self.visit(node.test)
 
         st = StatementTranslator(self._allocator, self._globals)

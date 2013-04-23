@@ -53,7 +53,35 @@ def if_test4_variable_assigned_only_in_else_branch():
     assert 0 == variable_assigned_only_in_else_branch(0)
     # TODO: how to test that the function fails when if arg!=0?
 
+def return_in_both_branches(x):
+  if x == 0:
+    return 0
+  else:
+    return 1
 
+def if_test5_return_in_both_branches():
+    assert 0 == return_in_both_branches(0)
+    assert 1 == return_in_both_branches(1)
+
+def return_in_then_branch(x):
+  if x == 0:
+    return 0
+  return 1
+
+def if_test6_return_in_then_branch():
+    assert 0 == return_in_then_branch(0)
+    assert 1 == return_in_then_branch(1)
+
+def return_in_else_branch(x):
+  if x == 0:
+    pass
+  else:
+    return 1
+  return 0
+
+def if_test7_return_in_else_branch():
+    assert 0 == return_in_else_branch(0)
+    assert 1 == return_in_else_branch(1)
 
 def main():
     if_test0_variable_initialized_in_both_branches()
@@ -61,4 +89,7 @@ def main():
     if_test2_variable_assigned_in_else_branch()
     if_test3_variable_assigned_only_in_then_branch()
     if_test4_variable_assigned_only_in_else_branch()
+    if_test5_return_in_both_branches()
+    if_test6_return_in_then_branch()
+    if_test7_return_in_else_branch()
     print(1)
