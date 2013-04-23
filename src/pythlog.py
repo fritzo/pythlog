@@ -600,7 +600,7 @@ class SymbolResolver(NodeTransformer):
         else:
             self_arg = []
             func = self.visit(node.func)
-        return self.copy_node(node, func=func, args=self_arg + node.args)
+        return self.copy_node(node, func=func, args=self_arg + self.visit(node.args))
 
 class SingleReturnRewriter(NodeTransformer):
     def __init__(self):
@@ -833,6 +833,9 @@ i_cmpeq(L, R, t_bool(0)) :-
     L \= R. % TODO: reify unification to boolean result!
 i_cmpnoteq(t_int(L), t_int(R), t_bool(Result)) :-
     Result #<==> (L #\= R).
+i_cmpnoteq(O, O, t_bool(0)).
+i_cmpnoteq(L, R, t_bool(1)) :-
+    L \= R. % TODO: reify unification to boolean result!
 i_cmplt(t_int(L), t_int(R), t_bool(Result)) :-
     Result #<==> (L #< R).
 i_cmpgt(t_int(L), t_int(R), t_bool(Result)) :-
@@ -946,7 +949,12 @@ g_print(Objects, Io, t_None) :-
 g_repr(t_int(I), t_str(Repr)) :-
     integer(I), !,
     number_codes(I, Repr).
-g_repr(t_int(_), t_str("?int")).
+g_repr(t_int(I), t_str(Result)) :-
+    fd_dom(I, Dom), term_to_atom(Dom, DomA), name(DomA, DomS),
+    append("?int:", DomS, Result).
+g_repr(t_object(Type, _Args, _Ref), t_str(Repr)) :-
+    name(Type, [_, _|StrType]), % skip leading 'g_'
+    append(StrType, "()", Repr).
 
 g_str(Object, Str) :-
     g_repr(Object, Str).

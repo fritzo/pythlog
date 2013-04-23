@@ -54,9 +54,9 @@ def class_test5_add_new_attribute():
     assert o.new_attribute == 1
 
 def class_test6_deconstruct_object():
-    o1 = Object1(1)
+    o1 = Object1(Object1(1))
     x = free
-    assert o1 == Object1(x)
+    assert o1 == Object1(Object1(x))
     assert x == 1
 
 def main():
