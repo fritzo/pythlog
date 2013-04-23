@@ -224,9 +224,7 @@ class StatementTranslator(ast.NodeVisitor):
         return "t_int(%s)" % node.n
 
     def visit_NewObject(self, node):
-        args = ", ".join("'%s'=%s" % (attr, self.visit(arg))
-                         for (attr, arg) in zip(node.attrs, node.args))
-        return "t_object(%s, [%s], _)" % (node.type, args)
+        return "t_object(%s, [], _)" % node.type
 
     def visit_UnaryOp(self, node):
         operand = self.visit(node.operand)
@@ -386,9 +384,9 @@ class NewObject(ast.expr):
     """
     Represents the ast for constructing a new object. 
     """
-    def __init__(self, type, attrs, args):
-        ast.expr.__init__(self, type=type, attrs=attrs, args=args)
-        self._fields = ('type', 'attrs', 'args')
+    def __init__(self, type):
+        ast.expr.__init__(self, type=type)
+        self._fields = ('type', )
 
 def maxmin(x, y):
     if x > y:
@@ -507,7 +505,9 @@ def assign_uninitialized(var_name):
     Get the ast for assigning 'var_name' to 'uninitialized. Implemented as:
         var_name = uninitialized
     """
-    return ast.Assign(targets=[ast.Name(id=var_name, ctx=ast.Store())], value=ast.Name(id='uninitialized', ctx=ast.Load()))
+    # 'uninitialized' is guaranteed to be a symbol that does not refer to anything
+    # because the SymbolResolver prefixes all symbols with wither g_ or m_.
+    return assignment(var_name, value=ast.Name(id='uninitialized', ctx=ast.Load()))
 
 def assignment(var_name, value):
     """
@@ -515,18 +515,18 @@ def assignment(var_name, value):
     """
     return ast.Assign(targets=[ast.Name(id=var_name, ctx=ast.Store())], value=value)
 
-def mangle_attrname(name):
-    return '1' + name
-
-def ctor_return_stmt(class_name, class_attrs):
+def ctor_return_stmt():
     """
     Get the ast for the return statement used when translating constructor
     into normal function.
     """ 
-    args = [ast.Name(id=mangle_attrname(a), ctx=ast.Load()) for a in class_attrs]
-    return ast.Return(value=NewObject(type=class_name,
-                                      attrs=list(class_attrs),
-                                      args=args))
+    return ast.Return(value=ast.Name(id='self', ctx=ast.Load()))
+
+def ctor_self_init(class_name):
+    """
+    Get the ast for the initialization of 'self' in the constructor.
+    """
+    return assignment('self', NewObject(class_name))
 
 class SymbolResolver(NodeTransformer):
     """
@@ -543,7 +543,6 @@ class SymbolResolver(NodeTransformer):
         self._class_has_ctor = False
         self._locals_and_args = set()
         self._in_ctor = False
-        self._class_attrs = set()
 
     def visit_Name(self, node):
         if node.id in self._globals:
@@ -552,26 +551,12 @@ class SymbolResolver(NodeTransformer):
         self._locals_and_args.add(node.id)
         return node
 
-    def visit_Assign(self, node):
-        if not self._in_ctor:
-            return self.copy_node(node)
-
-        assert(len(node.targets) == 1)
-        target = node.targets[0]
-        if (type(target) == ast.Attribute and
-            type(target.value) == ast.Name and
-            target.value.id == 'self'):
-            self._class_attrs.add(target.attr)
-            return assignment(mangle_attrname(target.attr), node.value)
-        return self.copy_node(node)
-
     def visit_FunctionDef(self, node):
         self._locals_and_args = set()
-        self._class_attrs = set()
         self._in_ctor = self._current_class_def is not None and node.name == '__init__'
         self._class_has_ctor |= self._in_ctor
 
-        visited_body = self.visit(node.body) # Populates self._locals_and_args and (potentially) self._class_attrs
+        visited_body = self.visit(node.body) # Populates self._locals_and_args
         local_vars = self._locals_and_args - set(a.arg for a in node.args.args) - {'free'}
         var_inits = [assign_uninitialized(v) for v in local_vars]
         body = var_inits + visited_body
@@ -582,7 +567,7 @@ class SymbolResolver(NodeTransformer):
                 return self.copy_node(node,
                                       name=name,
                                       args=new_args,
-                                      body=body + [ctor_return_stmt(name, self._class_attrs)])
+                                      body=[ctor_self_init(name)] + body + [ctor_return_stmt()])
             else:
                 assert_type = self.visit(assert_self_type(self._current_class_def.name))
                 return self.copy_node(node,
@@ -596,7 +581,7 @@ class SymbolResolver(NodeTransformer):
     def visit_ClassDef(self, node):
         self._current_class_def = node
         self._class_has_ctor = False
-        new_node = self.copy_node(node, name='g_' + node.name, attrs=self._class_attrs)
+        new_node = self.copy_node(node, name='g_' + node.name)
 
         if not self._class_has_ctor:
             new_node.body.append(self.visit(EMPTY_CTOR_DEF))
