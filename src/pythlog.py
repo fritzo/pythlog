@@ -879,6 +879,8 @@ update_attr(IsAssigned, Name, Value, [AttrName=AttrValue|Attrs], [AttrName=Updat
 
 m___add__([t_int(L), t_int(R)], _Io, t_int(Result)) :-
     Result #= L + R.
+m___radd__([t_int(R), t_int(L)], _Io, t_int(Result)) :-
+    Result #= L + R.
 m___sub__([t_int(L), t_int(R)], _Io, t_int(Result)) :-
     Result #= L - R.
 m___mul__([t_int(L), t_int(R)], _Io, t_int(Result)) :-
