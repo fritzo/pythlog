@@ -53,6 +53,12 @@ def class_test5_add_new_attribute():
     o.new_attribute = 1
     assert o.new_attribute == 1
 
+def class_test6_deconstruct_object():
+    o1 = Object1(1)
+    x = free
+    assert o1 == Object1(x)
+    assert x == 1
+
 def main():
     class_test0_call_method()
     class_test1_type_of_object()
@@ -60,4 +66,5 @@ def main():
     class_test3_assign_attribute()
     class_test4_backtrack_attribute_assignment()
     class_test5_add_new_attribute()
+    class_test6_deconstruct_object()
     print(1)
