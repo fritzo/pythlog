@@ -362,7 +362,8 @@ def translate_class(class_node, allocator, globals):
     predicates = []
 #    print(ast.dump(class_node))
     for decl in class_node.body:
-        predicates.extend(translate_function(decl, allocator, globals))
+        if type(decl) != ast.Pass:
+            predicates.extend(translate_function(decl, allocator, globals))
     return predicates
 
 
