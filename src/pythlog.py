@@ -377,7 +377,7 @@ EMPTY_CTOR_DEF = ast.FunctionDef(name='__init__',
                                                     kwargannotation=None,
                                                     defaults=[],
                                                     kw_defaults=[]),
-                                 body=[ast.Pass()],
+                                 body=[],
                                  decorator_list=[],
                                  returns=None)
 

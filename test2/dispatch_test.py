@@ -22,17 +22,22 @@ def dispatch_test0_nondeterministic_function():
     assert nondeterministic_function(x) == 2
     assert x.value == 2
 
-def sum_is_correct(a, b, c):
+def sum_is_correct(a, b, c, x):
     assert a + b == c
+    x.value = 1
     return 1
 
-def sum_is_correct(a, b, c):
+def sum_is_correct(a, b, c, x):
     assert a + b != c
+    x.value = 0
     return 0
 
 def dispatch_test1_predicate_dispatch():
-    assert sum_is_correct(1, 2, 3) == 1
-    assert sum_is_correct(1, 2, 4) == 0
+    x = X()
+    assert sum_is_correct(1, 2, 3, x) == 1
+    assert x.value == 1
+    assert sum_is_correct(1, 2, 4, x) == 0
+    assert x.value == 0
 
 def main():
     dispatch_test0_nondeterministic_function()
