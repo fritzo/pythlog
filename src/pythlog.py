@@ -226,6 +226,9 @@ class StatementTranslator(ast.NodeVisitor):
     def visit_GlobalName(self, node):
         return node.id
 
+    def visit_Free(self, node):
+        return '_'
+
     def visit_Num(self, node):
         return "t_int(%s)" % node.n
 
@@ -425,6 +428,13 @@ class LocalName(ast.expr):
         ast.expr.__init__(self, **kwargs)
         self._fields = ('id', )
 
+class Free(ast.expr):
+    """
+    Represents the ast for the keyword 'free'.
+    """
+    def __init__(self):
+        ast.expr.__init__(self)
+
 def maxmin(x, y):
     if x > y:
         return x, y
@@ -510,9 +520,7 @@ class SsaRewriter(NodeTransformer):
                               invars=list(locals_before.values()))
 
     def visit_LocalName(self, node):
-        if node.id == 'free':
-            id = self._new_local(node.id)
-        elif type(node.ctx) == ast.Store:
+        if type(node.ctx) == ast.Store:
             id = self._new_local(node.id)
         elif node.id in self._locals:
             id = self._locals[node.id]
@@ -580,6 +588,8 @@ class SymbolResolver(NodeTransformer):
         self._in_ctor = False
 
     def visit_Name(self, node):
+        if node.id == 'free':
+            return Free()
         if node.id in self._globals:
             return self.copy_node(node, GlobalName, id='g_' + node.id)
 
