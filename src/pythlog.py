@@ -226,6 +226,10 @@ class StatementTranslator(ast.NodeVisitor):
     def visit_NewObject(self, node):
         return "t_object(%s, [], _)" % node.type
 
+    def visit_List(self, node):
+        elts = ", ".join(self.visit(e) for e in node.elts)
+        return "t_list([%s])" % elts 
+
     def visit_UnaryOp(self, node):
         operand = self.visit(node.operand)
         op = type(node.op).__name__.lower()
@@ -962,6 +966,8 @@ g_str(Object, Str) :-
 
 
 g_type([t_object(Type, _Attrs, _Ref)], _Io, Type).
+g_len([t_list(Elts)], _Io, t_int(L)) :-
+    length(Elts, L).
 
 
 io_write([]).
