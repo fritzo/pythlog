@@ -25,9 +25,29 @@ def list_test3_extend_list():
     assert len(l) == 3
     assert l == [1, 2, 3]
 
+def list_test4_add_list():
+    l0 = [1]
+    l1 = [2, 3]
+    l2 = [4]
+    assert l0 + l1 + l2 == [1, 2, 3, 4]
+
+    l = free
+    assert l0 + l == [1, 2]
+    assert l == [2]
+
+def list_test5_sub_list():
+    l0 = [1, 2, 3]
+    assert l0 - [3] == [1, 2]
+
+    l = free
+    assert l0 - l == [1]
+    assert l == [2, 3]
+
 def main():
     list_test0_length_of_list()
     list_test1_index_list()
     list_test2_append_element()
     list_test3_extend_list()
+    list_test4_add_list()
+    list_test5_sub_list()
     print(1)

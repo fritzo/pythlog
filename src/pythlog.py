@@ -910,10 +910,14 @@ update_attr(IsAssigned, Name, Value, [AttrName=AttrValue|Attrs], [AttrName=Updat
     ),
     update_attr(NextIsAssigned, Name, Value, Attrs, NewAttrs).
 
+m___add__([t_list(L), t_list(R)], _, t_list(Result)) :-
+    append(L, R, Result).
 m___add__([t_int(L), t_int(R)], _Io, t_int(Result)) :-
     Result #= L + R.
 m___radd__([t_int(R), t_int(L)], _Io, t_int(Result)) :-
     Result #= L + R.
+m___sub__([t_list(L), t_list(R)], _, t_list(Result)) :-
+    append(Result, R, L).
 m___sub__([t_int(L), t_int(R)], _Io, t_int(Result)) :-
     Result #= L - R.
 m___mul__([t_int(L), t_int(R)], _Io, t_int(Result)) :-
