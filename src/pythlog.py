@@ -99,7 +99,10 @@ class PrettyPrinter(NodeVisitor):
     def visit_Num(self, node):
         return str(node.n)
 
-    def visit_Name(self, node):
+    def visit_LocalName(self, node):
+        return node.id
+
+    def visit_GlobalName(self, node):
         return node.id
 
     def visit_Compare(self, node):
@@ -217,18 +220,31 @@ class StatementTranslator(ast.NodeVisitor):
         return self._predicates
 
     # Expression nodes
-    def visit_Name(self, node):
+    def visit_LocalName(self, node):
+        return node.id
+
+    def visit_GlobalName(self, node):
         return node.id
 
     def visit_Num(self, node):
         return "t_int(%s)" % node.n
+
+    def visit_Index(self, node):
+        return self.visit(node.value)
 
     def visit_NewObject(self, node):
         return "t_object(%s, [], _)" % node.type
 
     def visit_List(self, node):
         elts = ", ".join(self.visit(e) for e in node.elts)
-        return "t_list([%s])" % elts 
+        return "t_list([%s])" % elts
+
+    def visit_Subscript(self, node):
+        result = self._allocator.tempvar()
+        value = self.visit(node.value)
+        slice = self.visit(node.slice)
+        self._code.append('m___getitem__([%s, %s], Io, %s)' % (value, slice, result))
+        return result
 
     def visit_UnaryOp(self, node):
         operand = self.visit(node.operand)
@@ -278,7 +294,7 @@ class StatementTranslator(ast.NodeVisitor):
     def visit_Assign(self, node):
         assert len(node.targets) == 1, ast.dump(node)
         value = self.visit(node.value)
-        if type(node.targets[0]) == ast.Name:
+        if type(node.targets[0]) == LocalName:
             target = self.visit(node.targets[0])
             self._code.append('i_assign(%s, %s)' % (target, value))
         elif type(node.targets[0]) == ast.Attribute:
@@ -286,7 +302,7 @@ class StatementTranslator(ast.NodeVisitor):
             attr = node.targets[0].attr
             self._code.append("i_setattr(%s, '%s', %s)" % (target, attr, value))    
         else:
-            assert False
+            assert False, ast.dump(node)
         return self._code
 
     def visit_Return(self, node):
@@ -393,6 +409,22 @@ class NewObject(ast.expr):
         ast.expr.__init__(self, type=type)
         self._fields = ('type', )
 
+class GlobalName(ast.expr):
+    """
+    Represents the ast for a global name (e.g., reference to a class). 
+    """
+    def __init__(self, **kwargs):
+        ast.expr.__init__(self, **kwargs)
+        self._fields = ('id', )
+
+class LocalName(ast.expr):
+    """
+    Represents the ast for a local name (local variable). 
+    """
+    def __init__(self, **kwargs):
+        ast.expr.__init__(self, **kwargs)
+        self._fields = ('id', )
+
 def maxmin(x, y):
     if x > y:
         return x, y
@@ -461,8 +493,8 @@ class SsaRewriter(NodeTransformer):
 
             out_var = self._localvar_name(var, max_idx)
             in_var = self._localvar_name(var, min_idx)
-            assign = ast.Assign(targets=[ast.Name(id=out_var, ctx=ast.Store())],
-                                value=ast.Name(id=in_var, ctx=ast.Load()))
+            assign = ast.Assign(targets=[LocalName(id=out_var, ctx=ast.Store())],
+                                value=LocalName(id=in_var, ctx=ast.Load()))
             if max_idx > body_idx:
                 body.append(assign)
             elif max_idx > orelse_idx:
@@ -477,17 +509,15 @@ class SsaRewriter(NodeTransformer):
                               outvars=outvars,
                               invars=list(locals_before.values()))
 
-    def visit_Name(self, node):
+    def visit_LocalName(self, node):
         if node.id == 'free':
             id = self._new_local(node.id)
         elif type(node.ctx) == ast.Store:
             id = self._new_local(node.id)
         elif node.id in self._locals:
             id = self._locals[node.id]
-        elif node.id == 'self':
-            return ast.Name(id='Self', ctx=ast.Load())
         else:
-            id = node.id # Not a local var => global name
+            assert False, node.id
         return self.copy_node(node, id=id)
 
     def visit_Assign(self, node):
@@ -504,7 +534,7 @@ def assert_self_type(type_name):
     """
     return [ast.Assert(test=ast.Compare(left=ast.Call(func=ast.Name(id='type', ctx=ast.Load()), args=[ast.Name(id='self', ctx=ast.Load())], keywords=[], starargs=None, kwargs=None), ops=[ast.Eq()], comparators=[ast.Name(id=type_name, ctx=ast.Load())]), msg=None)]
 
-
+UNINITIALIZED = GlobalName(id='uninitialized', ctx=ast.Load())
 def assign_uninitialized(var_name):
     """
     Get the ast for assigning 'var_name' to 'uninitialized. Implemented as:
@@ -512,20 +542,20 @@ def assign_uninitialized(var_name):
     """
     # 'uninitialized' is guaranteed to be a symbol that does not refer to anything
     # because the SymbolResolver prefixes all symbols with wither g_ or m_.
-    return assignment(var_name, value=ast.Name(id='uninitialized', ctx=ast.Load()))
+    return assignment(var_name, value=UNINITIALIZED)
 
 def assignment(var_name, value):
     """
     Get the ast for assigning 'var_name' to 'value.
     """
-    return ast.Assign(targets=[ast.Name(id=var_name, ctx=ast.Store())], value=value)
+    return ast.Assign(targets=[LocalName(id=var_name, ctx=ast.Store())], value=value)
 
 def ctor_return_stmt():
     """
     Get the ast for the return statement used when translating constructor
     into normal function.
     """ 
-    return ast.Return(value=ast.Name(id='self', ctx=ast.Load()))
+    return ast.Return(value=LocalName(id='self', ctx=ast.Load()))
 
 def ctor_self_init(class_name):
     """
@@ -551,10 +581,10 @@ class SymbolResolver(NodeTransformer):
 
     def visit_Name(self, node):
         if node.id in self._globals:
-            return self.copy_node(node, id='g_' + node.id)
+            return self.copy_node(node, GlobalName, id='g_' + node.id)
 
         self._locals_and_args.add(node.id)
-        return node
+        return self.copy_node(node, LocalName)
 
     def visit_FunctionDef(self, node):
         self._locals_and_args = set()
@@ -601,7 +631,7 @@ class SymbolResolver(NodeTransformer):
         """
         if type(node.func) == ast.Attribute:
             self_arg = [self.visit(node.func.value)]
-            func = ast.Name(id='m_' + node.func.attr, ctx=ast.Load())
+            func = GlobalName(id='m_' + node.func.attr, ctx=ast.Load())
         else:
             self_arg = []
             func = self.visit(node.func)
@@ -625,13 +655,13 @@ class SingleReturnRewriter(NodeTransformer):
                 add_to = cond
 
         if len(cond) > 0:
-            uncond.append(ast.If(test=ast.Compare(left=ast.Name(id='0has_returned', ctx=ast.Load()), ops=[ast.Eq()], comparators=[ast.Num(n=0)]), body=cond, orelse=[]))
+            uncond.append(ast.If(test=ast.Compare(left=LocalName(id='0has_returned', ctx=ast.Load()), ops=[ast.Eq()], comparators=[ast.Num(n=0)]), body=cond, orelse=[]))
         return uncond
 
     def visit_Return(self, node):
         self._return_seen = True
-        return [ast.Assign(targets=[ast.Name(id='0return', ctx=ast.Store())], value=node.value),
-                ast.Assign(targets=[ast.Name(id='0has_returned', ctx=ast.Store())], value=ast.Num(n=1))]
+        return [ast.Assign(targets=[LocalName(id='0return', ctx=ast.Store())], value=node.value),
+                ast.Assign(targets=[LocalName(id='0has_returned', ctx=ast.Store())], value=ast.Num(n=1))]
 
     def visit_If(self, node):
         return self.copy_node(node,
@@ -641,14 +671,14 @@ class SingleReturnRewriter(NodeTransformer):
     def visit_FunctionDef(self, node):
         self._return_seen = False
 
-        body = [ast.Assign(targets=[ast.Name(id='0has_returned', ctx=ast.Store())], value=ast.Num(n=0)),
-                ast.Assign(targets=[ast.Name(id='0return', ctx=ast.Store())], value=ast.Name(id='uninitialized', ctx=ast.Load()))]
+        body = [ast.Assign(targets=[LocalName(id='0has_returned', ctx=ast.Store())], value=ast.Num(n=0)),
+                ast.Assign(targets=[LocalName(id='0return', ctx=ast.Store())], value=UNINITIALIZED)]
         body.extend(self.visit_stmts(node.body))
 
         if self._return_seen:
-            return_stmt = [ast.Return(value=ast.Name(id='0return', ctx=ast.Load()))]
+            return_stmt = [ast.Return(value=LocalName(id='0return', ctx=ast.Load()))]
         else:
-            return_stmt = [ast.Return(value=ast.Name(id='g_None', ctx=ast.Load()))]
+            return_stmt = [ast.Return(value=GlobalName(id='g_None', ctx=ast.Load()))]
 
 
         new = self.copy_node(node, body=body + return_stmt)
@@ -938,6 +968,17 @@ fix_sign(I, Result) :-
     I #> {max_bit_val} / 2,
     Result #= I - {max_bit_val}.
 
+m___getitem__([t_list(Elts), t_int(I)], _Io, Result) :-
+    nth0(I, Elts, Result).
+m_append([List, Element], _Io, g_None) :-
+    List = t_list(Es),
+    append(Es, [Element], NewEs),
+    setarg(1, List, NewEs).
+m_extend([List, t_list(XList)], _Io, g_None) :-
+    List = t_list(Es),
+    append(Es, XList, NewEs),
+    setarg(1, List, NewEs).
+
 to_print_string([], Acc, t_str(Acc)).
 to_print_string([H|T], Acc, Result) :-
     g_str(H, t_str(HStr)),
@@ -945,7 +986,7 @@ to_print_string([H|T], Acc, Result) :-
     to_print_string(T, NextAcc, Result).
 
 
-g_print(Objects, Io, t_None) :-
+g_print(Objects, Io, g_None) :-
     to_print_string(Objects, [], Str),
     io(List) = Io,
     append(List, [Str], Result),
