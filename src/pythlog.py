@@ -418,7 +418,7 @@ class GlobalName(ast.expr):
     """
     def __init__(self, **kwargs):
         ast.expr.__init__(self, **kwargs)
-        self._fields = ('id', )
+        self._fields = ('id', 'ctx')
 
 class LocalName(ast.expr):
     """
@@ -426,7 +426,7 @@ class LocalName(ast.expr):
     """
     def __init__(self, **kwargs):
         ast.expr.__init__(self, **kwargs)
-        self._fields = ('id', )
+        self._fields = ('id', 'ctx')
 
 class Free(ast.expr):
     """
@@ -503,8 +503,7 @@ class SsaRewriter(NodeTransformer):
 
             out_var = self._localvar_name(var, max_idx)
             in_var = self._localvar_name(var, min_idx)
-            assign = ast.Assign(targets=[LocalName(id=out_var, ctx=ast.Store())],
-                                value=LocalName(id=in_var, ctx=ast.Load()))
+            assign = assignment(out_var, LocalName(id=in_var, ctx=ast.Load()))
             if max_idx > body_idx:
                 body.append(assign)
             elif max_idx > orelse_idx:
@@ -530,7 +529,7 @@ class SsaRewriter(NodeTransformer):
 
     def visit_Assign(self, node):
         # NOTE: 'value' and 'targets' must be visited in this order due to
-        # side-effects
+        # side-effects in the visit-method.
         value = self.visit(node.value)
         targets = [self.visit(t) for t in node.targets]
         return self.copy_node(node, targets=targets, value=value)
@@ -545,11 +544,12 @@ def assert_self_type(type_name):
 UNINITIALIZED = GlobalName(id='uninitialized', ctx=ast.Load())
 def assign_uninitialized(var_name):
     """
-    Get the ast for assigning 'var_name' to 'uninitialized. Implemented as:
+    Get the ast for assigning 'var_name' to 'uninitialized'. Implemented as:
         var_name = uninitialized
     """
-    # 'uninitialized' is guaranteed to be a symbol that does not refer to anything
-    # because the SymbolResolver prefixes all symbols with wither g_ or m_.
+    # 'uninitialized' is guaranteed to be a symbol that does not refer to
+    # anything because the SymbolResolver prefixes all global symbols with
+    # either g_ or m_.
     return assignment(var_name, value=UNINITIALIZED)
 
 def assignment(var_name, value):
@@ -591,10 +591,10 @@ class SymbolResolver(NodeTransformer):
         if node.id == 'free':
             return Free()
         if node.id in self._globals:
-            return self.copy_node(node, GlobalName, id='g_' + node.id)
+            return GlobalName(id='g_' + node.id, ctx=node.ctx)
 
         self._locals_and_args.add(node.id)
-        return self.copy_node(node, LocalName)
+        return LocalName(id=node.id, ctx=node.ctx)
 
     def visit_FunctionDef(self, node):
         self._locals_and_args = set()
@@ -670,8 +670,8 @@ class SingleReturnRewriter(NodeTransformer):
 
     def visit_Return(self, node):
         self._return_seen = True
-        return [ast.Assign(targets=[LocalName(id='0return', ctx=ast.Store())], value=node.value),
-                ast.Assign(targets=[LocalName(id='0has_returned', ctx=ast.Store())], value=ast.Num(n=1))]
+        return [assignment('0return', node.value),
+                assignment('0has_returned', ast.Num(n=1))]
 
     def visit_If(self, node):
         return self.copy_node(node,
@@ -681,8 +681,8 @@ class SingleReturnRewriter(NodeTransformer):
     def visit_FunctionDef(self, node):
         self._return_seen = False
 
-        body = [ast.Assign(targets=[LocalName(id='0has_returned', ctx=ast.Store())], value=ast.Num(n=0)),
-                ast.Assign(targets=[LocalName(id='0return', ctx=ast.Store())], value=UNINITIALIZED)]
+        body = [assignment('0has_returned', ast.Num(n=0)),
+                assign_uninitialized('0return')]
         body.extend(self.visit_stmts(node.body))
 
         if self._return_seen:

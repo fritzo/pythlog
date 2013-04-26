@@ -35,7 +35,7 @@ def list_test4_add_list():
     assert l0 + l == [1, 2]
     assert l == [2]
 
-def list_test5_sub_list():
+def list_test5_subtract_list():
     l0 = [1, 2, 3]
     assert l0 - [3] == [1, 2]
 
@@ -49,5 +49,5 @@ def main():
     list_test2_append_element()
     list_test3_extend_list()
     list_test4_add_list()
-    list_test5_sub_list()
+    list_test5_subtract_list()
     print(1)
