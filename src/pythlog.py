@@ -304,6 +304,10 @@ class StatementTranslator(ast.NodeVisitor):
             target = self.visit(node.targets[0].value)
             attr = node.targets[0].attr
             self._code.append("i_setattr(%s, '%s', %s)" % (target, attr, value))    
+        elif type(node.targets[0]) == ast.Subscript:
+            target = self.visit(node.targets[0].value)
+            slice = self.visit(node.targets[0].slice)
+            self._code.append("m___setitem__([%s, %s, %s], Io, Result)" % (target, slice, value))
         else:
             assert False, ast.dump(node)
         return self._code
@@ -981,6 +985,17 @@ fix_sign(I, I) :-
 fix_sign(I, Result) :-
     I #> {max_bit_val} / 2,
     Result #= I - {max_bit_val}.
+
+m___setitem__([List, t_int(Idx), Item], _Io, g_None) :-
+    List = t_list(Es),
+    nth0_replace(Es, Idx, Item, NewEs),
+    setarg(1, List, NewEs).
+
+nth0_replace([_|T], 0, Item, [Item|T]).
+nth0_replace([H|T], Idx, Item, [H|R]) :-
+    Idx #> 0,
+    NextIdx #= Idx - 1,
+    nth0_replace(T, NextIdx, Item, R).
 
 m___getitem__([t_list(Elts), t_int(I)], _Io, Result) :-
     nth0(I, Elts, Result).

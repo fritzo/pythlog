@@ -43,6 +43,15 @@ def list_test5_subtract_list():
     assert l0 - l == [1]
     assert l == [2, 3]
 
+def list_test6_assign_element():
+    l = [1, 1]
+    l[0] = 0
+    assert l == [0, 1]
+
+    i = free
+    l[i] = 0
+    assert i == 1
+
 def main():
     list_test0_length_of_list()
     list_test1_index_list()
@@ -50,4 +59,5 @@ def main():
     list_test3_extend_list()
     list_test4_add_list()
     list_test5_subtract_list()
+    list_test6_assign_element()
     print(1)
