@@ -11,6 +11,10 @@ class Object1:
     def method(self):
         return self._value
 
+class Object2(Object0):
+    pass
+
+
 def class_test0_call_method():
     o0 = Object0()
     o1 = Object1(1)
@@ -59,6 +63,16 @@ def class_test6_deconstruct_object():
     assert o1 == Object1(Object1(x))
     assert x == 1
 
+def class_test7_multiply_referenced():
+    o0 = Object1(1)
+    o1 = o0
+    o0.new_attribute = 0
+    assert o1.new_attribute == 0
+
+def class_test8_inheritance():
+    o0 = Object2()
+#    assert o0.method() == 0
+
 def main():
     class_test0_call_method()
     class_test1_type_of_object()
@@ -67,4 +81,6 @@ def main():
     class_test4_backtrack_attribute_assignment()
     class_test5_add_new_attribute()
     class_test6_deconstruct_object()
+    class_test7_multiply_referenced()
+    class_test8_inheritance()
     print(1)

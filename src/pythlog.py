@@ -2,7 +2,7 @@
 
 import ast
 
-pythlog_builtlins = "".split()
+pythlog_builtlins = "write var".split()
 class FindGlobalSymbols(ast.NodeVisitor):
     def __init__(self):
         self._symbols = set()
@@ -971,7 +971,8 @@ m___rxor__([t_int(R), t_int(L)], _Io, t_int(Result)) :-
     no_sign(R, Rs),
     {int_xor_body},
     fix_sign(UnsignedResult, Result).
-m___neg__([t_int(I)], _Io, t_int(-I)).
+m___neg__([t_int(I)], _Io, t_int(Neg)) :-
+    Neg #= -I.
 m___invert__([t_int(I)], _Io, t_int(Result)) :-
     Result #= -I -1.
 
@@ -990,7 +991,6 @@ m___setitem__([List, t_int(Idx), Item], _Io, g_None) :-
     List = t_list(Es),
     nth0_replace(Es, Idx, Item, NewEs),
     setarg(1, List, NewEs).
-
 nth0_replace([_|T], 0, Item, [Item|T]).
 nth0_replace([H|T], Idx, Item, [H|R]) :-
     Idx #> 0,
@@ -1010,31 +1010,65 @@ m_extend([List, t_list(XList)], _Io, g_None) :-
 
 to_print_string([], Acc, t_str(Acc)).
 to_print_string([H|T], Acc, Result) :-
-    g_str(H, t_str(HStr)),
+    g_str([H], t_str(HStr)),
     append(Acc, HStr, NextAcc),
     to_print_string(T, NextAcc, Result).
 
-
+g_var([t_int(I)], _Io, t_bool(1)) :-
+    fd_var(I).
+g_var([t_int(I)], _Io, t_bool(0)) :-
+    not(fd_var(I)).
+g_write(Objects, _Io, g_None) :-
+    write(Objects), nl.
 g_print(Objects, Io, g_None) :-
     to_print_string(Objects, [], Str),
     io(List) = Io,
     append(List, [Str], Result),
     setarg(1, Io, Result).
 
-g_repr(t_int(I), t_str(Repr)) :-
+m___str__(u, u).
+m___repr__([t_int(I)], t_str(Repr)) :-
     integer(I), !,
     number_codes(I, Repr).
-g_repr(t_int(I), t_str(Result)) :-
+m___repr__([t_int(I)], t_str(Result)) :-
     fd_dom(I, Dom), term_to_atom(Dom, DomA), name(DomA, DomS),
     append("?int:", DomS, Result).
-g_repr(t_object(Type, _Args, _Ref), t_str(Repr)) :-
+m___repr__([t_object(Type, _Attrs, _Ref)], t_str("?object")) :-
+    var(Type), !.
+m___repr__([t_object(Type, Attrs, _Ref)], t_str(Repr)) :-
     name(Type, [_, _|StrType]), % skip leading 'g_'
-    append(StrType, "()", Repr).
+    attr_list(Attrs, AttrList),
+    append(StrType, "(", T0),
+    repr_list(AttrList, T0, T1),
+    append(T1, ")", Repr).
+m___repr__([t_list(Es)], t_str(Repr)) :-
+    repr_list(Es, "[", Res),
+    append(Res, "]", Repr).
 
-g_str(Object, Str) :-
-    g_repr(Object, Str).
+g_str(ArgList, Str) :-
+    m___str__(ArgList, Str), !.
+g_str(ArgList, Str) :-
+    m___repr__(ArgList, Str).
+g_repr(ArgList, Str) :-
+    m___repr__(ArgList, Str).
+
+attr_list([], []).
+attr_list([_Name=Value|T], [Value|AT]) :-
+    attr_list(T, AT).
+repr_list([], Acc, Acc).
+repr_list([H], Acc, Res) :-
+    !,
+    m___repr__([H], t_str(R)),
+    append(Acc, R, Res).
+repr_list([H|T], Acc, Res) :-
+    m___repr__([H], t_str(R)),
+    append(Acc, R, Tmp),
+    append(Tmp, ", ", NextAcc),
+    repr_list(T, NextAcc, Res).
 
 
+
+g_type([t_int(_)], _Io, g_int).
 g_type([t_object(Type, _Attrs, _Ref)], _Io, Type).
 g_len([t_list(Elts)], _Io, t_int(L)) :-
     length(Elts, L).

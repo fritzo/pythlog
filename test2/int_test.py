@@ -104,6 +104,12 @@ def int_test10_bit_xor():
     assert 0x2 ^ x == 0x3
     assert x == 1
 
+def int_test11_type():
+    x = free
+    assert type(x) == int
+    assert x == 1
+
+
 
 def fac(n):
     assert n >= 0
@@ -130,7 +136,7 @@ def main():
     int_test8_bit_and()
     int_test9_bit_or()
     int_test10_bit_xor()
-
+    int_test11_type()
     int_test20_factorial()
     print(1)
 

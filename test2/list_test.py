@@ -52,6 +52,12 @@ def list_test6_assign_element():
     l[i] = 0
     assert i == 1
 
+def list_test7_mutliply_referenced():
+    l0 = [1]
+    l1 = l0
+    l0[0] = 0
+    assert l1[0] == 0
+
 def main():
     list_test0_length_of_list()
     list_test1_index_list()
@@ -60,4 +66,5 @@ def main():
     list_test4_add_list()
     list_test5_subtract_list()
     list_test6_assign_element()
+    list_test7_mutliply_referenced()
     print(1)
