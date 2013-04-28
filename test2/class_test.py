@@ -12,7 +12,8 @@ class Object1:
         return self._value
 
 class Object2(Object0):
-    pass
+    def method2(self):
+        return 20
 
 
 def class_test0_call_method():
@@ -71,7 +72,7 @@ def class_test7_multiply_referenced():
 
 def class_test8_inheritance():
     o0 = Object2()
-#    assert o0.method() == 0
+    assert o0.method() == 0
 
 def main():
     class_test0_call_method()

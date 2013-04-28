@@ -52,11 +52,17 @@ def list_test6_assign_element():
     l[i] = 0
     assert i == 1
 
-def list_test7_mutliply_referenced():
+def list_test7_multiply_referenced():
     l0 = [1]
     l1 = l0
     l0[0] = 0
     assert l1[0] == 0
+
+def list_test8_in():
+    l = [1, 2, 3, 4]
+    assert 1 in l
+    assert 3 in l
+    assert not (5 in l)
 
 def main():
     list_test0_length_of_list()
@@ -66,5 +72,6 @@ def main():
     list_test4_add_list()
     list_test5_subtract_list()
     list_test6_assign_element()
-    list_test7_mutliply_referenced()
+    list_test7_multiply_referenced()
+    list_test8_in()
     print(1)

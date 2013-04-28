@@ -2,24 +2,6 @@
 
 import ast
 
-pythlog_builtlins = "write var".split()
-class FindGlobalSymbols(ast.NodeVisitor):
-    def __init__(self):
-        self._symbols = set()
-
-    def global_symbols(self):
-        return set(list(self._symbols) + dir(__builtins__) + pythlog_builtlins)
-
-    def visit_FunctionDef(self, node):
-        self._symbols.add(node.name)
-
-    def visit_ClassDef(self, node):
-        self._symbols.add(node.name)
-
-def global_symbols(parse_tree):
-    symbol_finder = FindGlobalSymbols()
-    symbol_finder.visit(parse_tree)
-    return symbol_finder.global_symbols()
 
 class NodeTransformer(ast.NodeTransformer):
     """
@@ -76,6 +58,43 @@ class NodeVisitor(ast.NodeVisitor):
             return newlist
         elif type(node) not in (type(None), str):
             return ast.NodeTransformer.visit(self, node)
+
+
+pythlog_builtlins = "write var".split()
+class FindGlobalSymbols(ast.NodeVisitor):
+    def __init__(self):
+        self._symbols = set()
+
+    def global_symbols(self):
+        return set(list(self._symbols) + dir(__builtins__) + pythlog_builtlins)
+
+    def visit_FunctionDef(self, node):
+        self._symbols.add(node.name)
+
+    def visit_ClassDef(self, node):
+        self._symbols.add(node.name)
+
+def global_symbols(parse_tree):
+    """
+    Returns a set of the string representing the global symbols of the module.
+    """
+    symbol_finder = FindGlobalSymbols()
+    symbol_finder.visit(parse_tree)
+    return symbol_finder.global_symbols()
+
+class FindInheritance(NodeVisitor):
+    """
+    Returns a dict (str:list[str]) representing the list of classes every class
+    in the module inherits from.
+    """
+    def __init__(self):
+        self._inheritance = {}
+
+    def inheritance(self):
+        return self._inheritance
+
+    def visit_ClassDef(self, node):
+        self._inheritance[node.name] = [b.id for b in node.bases]
 
 
 class PrettyPrinter(NodeVisitor):
@@ -269,6 +288,19 @@ class StatementTranslator(ast.NodeVisitor):
         result = self._allocator.tempvar()
         self._code.append('i_bin%s(%s, %s, %s)' % (op, lhs, rhs, result))
         return result
+
+    def visit_BoolOp(self, node):
+        assert len(node.values) >= 2
+        values = [self.visit(v) for v in node.values]
+        op = type(node.op).__name__.lower()
+        result = values[0]
+        for v in values[1:]:
+            next_result = self._allocator.tempvar()
+            self._code.append('i_bool%s(%s, %s, %s)' % (
+                op, result, v, next_result))
+            result = next_result
+        return result
+         
 
     def visit_Compare(self, node):
         assert len(node.ops) == 1
@@ -541,9 +573,9 @@ class SsaRewriter(NodeTransformer):
 def assert_self_type(type_name):
     """
     Get the ast for assert the type of 'self'. Implemented as:
-        assert type(self) == type_name
+        assert isinstance(self, type_name)
     """
-    return [ast.Assert(test=ast.Compare(left=ast.Call(func=ast.Name(id='type', ctx=ast.Load()), args=[ast.Name(id='self', ctx=ast.Load())], keywords=[], starargs=None, kwargs=None), ops=[ast.Eq()], comparators=[ast.Name(id=type_name, ctx=ast.Load())]), msg=None)]
+    return [ast.Assert(test=ast.Call(func=ast.Name(id='isinstance', ctx=ast.Load()), args=[ast.Name(id='self', ctx=ast.Load()), ast.Name(id=type_name, ctx=ast.Load())], keywords=[], starargs=None, kwargs=None), msg=None)]
 
 UNINITIALIZED = GlobalName(id='uninitialized', ctx=ast.Load())
 def assign_uninitialized(var_name):
@@ -558,7 +590,7 @@ def assign_uninitialized(var_name):
 
 def assignment(var_name, value):
     """
-    Get the ast for assigning 'var_name' to 'value.
+    Get the ast for assigning 'var_name' to 'value'.
     """
     return ast.Assign(targets=[LocalName(id=var_name, ctx=ast.Store())], value=value)
 
@@ -594,6 +626,8 @@ class SymbolResolver(NodeTransformer):
     def visit_Name(self, node):
         if node.id == 'free':
             return Free()
+        # TODO: Global symbol might be chosen instead of local when there is a
+        # local symbol and a global symbol wit the same name. This is wrong.
         if node.id in self._globals:
             return GlobalName(id='g_' + node.id, ctx=node.ctx)
 
@@ -618,10 +652,10 @@ class SymbolResolver(NodeTransformer):
                                       args=new_args,
                                       body=[ctor_self_init(name)] + body + [ctor_return_stmt()])
             else:
-                assert_type = self.visit(assert_self_type(self._current_class_def.name))
+                assert_types = self.visit(assert_self_type(self._current_class_def.name))
                 return self.copy_node(node,
                                       name='m_' + node.name,
-                                      body=assert_type + body)
+                                      body=assert_types + body)
         else:
             return self.copy_node(node,
                                   name='g_' + node.name,
@@ -694,13 +728,33 @@ class SingleReturnRewriter(NodeTransformer):
         else:
             return_stmt = [ast.Return(value=GlobalName(id='g_None', ctx=ast.Load()))]
 
-
         new = self.copy_node(node, body=body + return_stmt)
         return new
 
 def ssa_form(parse_tree):
     """Rewrite functions into static single assignment form"""
     return SsaRewriter().visit(parse_tree)
+
+def define_type_dependent_builtins(parse_tree):
+    """
+    Defines builtin functions that are dependent on the defined types.
+    These functions are:
+      - isinstance
+    """
+    i = FindInheritance()
+    i.visit(parse_tree)
+    inheritance = i.inheritance()
+    templ = """
+def isinstance(obj, type_object):
+    assert type(obj) == %s
+    return type_object in [%s]
+    """
+    extras = []
+    for cls, supers in inheritance.items():
+        extras.append(ast.parse(templ % (cls, ", ".join([cls] + supers))))
+
+    return ast.Module(body=parse_tree.body + extras)
+
 
 def resolve_global_symbols(parse_tree):
     """
@@ -738,13 +792,14 @@ def single_return_point(parse_tree):
                 has_returned = 1
                 return_value = 1
             return return_value
-    This rewrite is necessary as Prolog do not have early exists from
+    This rewrite is necessary as Prolog do not have early exits from
     predicates.
     """
     return SingleReturnRewriter().visit(parse_tree)
 
 def compile_module(module_code):
     parse_tree = ast.parse(module_code)
+    parse_tree = define_type_dependent_builtins(parse_tree)
     parse_tree = resolve_global_symbols(parse_tree)
 #    print(prettyprint(parse_tree))
     parse_tree = single_return_point(parse_tree)
@@ -872,6 +927,8 @@ i_unaryusub(I, Result) :-
     m___neg__([I], _, Result).
 i_unaryinvert(I, Result) :-
     m___invert__([I], _, Result).
+i_unarynot(t_bool(0), t_bool(1)).
+i_unarynot(t_bool(1), t_bool(0)).
 
 i_cmpne(t_int(L), t_int(R), t_bool(Result)) :-
     Result #<==> (L #\= R).
@@ -893,6 +950,11 @@ i_cmpgte(t_int(L), t_int(R), t_bool(Result)) :-
     Result #<==> (L #>= R).
 i_cmplte(t_int(L), t_int(R), t_bool(Result)) :-
     Result #<==> (L #=< R).
+i_cmpin(Object, t_list(Elts), t_bool(1)) :-
+    nth0(_, Elts, Object).
+i_cmpin(Object, t_list(Elts), t_bool(0)) :-
+    not(nth0(_, Elts, Object)).
+
 
 i_return(Var, Var).
 
@@ -1027,6 +1089,8 @@ g_print(Objects, Io, g_None) :-
     setarg(1, Io, Result).
 
 m___str__(u, u).
+m___repr__([t_bool(0)], t_str("False")).
+m___repr__([t_bool(1)], t_str("True")).
 m___repr__([t_int(I)], t_str(Repr)) :-
     integer(I), !,
     number_codes(I, Repr).
