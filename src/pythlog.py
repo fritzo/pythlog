@@ -60,7 +60,7 @@ class NodeVisitor(ast.NodeVisitor):
             return ast.NodeTransformer.visit(self, node)
 
 
-pythlog_builtlins = "write var".split()
+pythlog_builtlins = "write".split()
 class FindGlobalSymbols(ast.NodeVisitor):
     def __init__(self):
         self._symbols = set()
@@ -81,6 +81,21 @@ def global_symbols(parse_tree):
     symbol_finder = FindGlobalSymbols()
     symbol_finder.visit(parse_tree)
     return symbol_finder.global_symbols()
+
+class FindAllNames(ast.NodeVisitor):
+    def __init__(self):
+        self.names = set()
+
+    def visit_Name(self, node):
+        self.names.add(node.id)
+
+def all_names_in(parse_tree):
+    """
+    Finds all names in a given parse tree.
+    """
+    f = FindAllNames()
+    f.visit(parse_tree)
+    return f.names
 
 class FindInheritance(NodeVisitor):
     """
@@ -594,6 +609,9 @@ def assignment(var_name, value):
     """
     return ast.Assign(targets=[LocalName(id=var_name, ctx=ast.Store())], value=value)
 
+def assert_equal(lhs, rhs):
+    return ast.Assert(test=ast.Compare(left=lhs, ops=[ast.Eq()], comparators=[rhs]), msg=None)
+
 def ctor_return_stmt():
     """
     Get the ast for the return statement used when translating constructor
@@ -731,6 +749,29 @@ class SingleReturnRewriter(NodeTransformer):
         new = self.copy_node(node, body=body + return_stmt)
         return new
 
+class ArgListMatchToAssert(NodeTransformer):
+    def __init__(self, globals):
+        self._globals = globals
+        self._func_prolog = []
+        self._current_args = []
+
+    def visit_arg(self, node):
+        if node.annotation is None:
+            return node
+
+        new_free_vars = all_names_in(node.annotation) - self._globals - self._current_args
+        for var in new_free_vars:
+            self._func_prolog.append(assignment(var, ast.Name('free', ast.Load())))
+        self._func_prolog.append(assert_equal(ast.Name(node.arg, ast.Load()), node.annotation))
+
+        return self.copy_node(node, annotation=None)
+
+    def visit_FunctionDef(self, node):
+        self._current_args = set(a.arg for a in node.args.args)
+        self._func_prolog = []
+        args = self.visit(node.args)
+        return self.copy_node(node, args=args, body=self._func_prolog + node.body)
+
 def ssa_form(parse_tree):
     """Rewrite functions into static single assignment form"""
     return SsaRewriter().visit(parse_tree)
@@ -797,9 +838,19 @@ def single_return_point(parse_tree):
     """
     return SingleReturnRewriter().visit(parse_tree)
 
+def arg_list_match_to_assert(parse_tree):
+    """
+    Rewrites
+        func(x: Class(a, b)): pass
+    to
+        func(x): a = free; b = free; assert x == Class(a, b)
+    """
+    return ArgListMatchToAssert(global_symbols(parse_tree)).visit(parse_tree)
+
 def compile_module(module_code):
     parse_tree = ast.parse(module_code)
     parse_tree = define_type_dependent_builtins(parse_tree)
+    parse_tree = arg_list_match_to_assert(parse_tree)
     parse_tree = resolve_global_symbols(parse_tree)
 #    print(prettyprint(parse_tree))
     parse_tree = single_return_point(parse_tree)
@@ -922,6 +973,8 @@ i_binbitxor(L, R, Result) :-
     m___xor__([L, R], _, Result).
 i_binbitxor(L, R, Result) :-
     m___rxor__([R, L], _, Result).
+i_boolor(t_bool(1), t_bool(_), t_bool(1)).
+i_boolor(t_bool(_), t_bool(1), t_bool(1)).
 
 i_unaryusub(I, Result) :-
     m___neg__([I], _, Result).
@@ -1076,10 +1129,6 @@ to_print_string([H|T], Acc, Result) :-
     append(Acc, HStr, NextAcc),
     to_print_string(T, NextAcc, Result).
 
-g_var([t_int(I)], _Io, t_bool(1)) :-
-    fd_var(I).
-g_var([t_int(I)], _Io, t_bool(0)) :-
-    not(fd_var(I)).
 g_write(Objects, _Io, g_None) :-
     write(Objects), nl.
 g_print(Objects, Io, g_None) :-

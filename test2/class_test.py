@@ -15,6 +15,9 @@ class Object2(Object0):
     def method2(self):
         return 20
 
+    def method(self):
+        return 1
+
 
 def class_test0_call_method():
     o0 = Object0()
@@ -73,6 +76,8 @@ def class_test7_multiply_referenced():
 def class_test8_inheritance():
     o0 = Object2()
     assert o0.method() == 0
+    assert o0.method() == 1
+    assert o0.method2() == 20
 
 def main():
     class_test0_call_method()
