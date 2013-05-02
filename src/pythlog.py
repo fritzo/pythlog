@@ -1009,10 +1009,12 @@ i_cmplte(t_int(L), t_int(R), t_bool(Result)) :-
 i_cmpin(Object0, Object1, Result) :-
     m___contains__([Object1, Object0], _Io, Result).
 
-m___contains__([t_list(Elts), Object], _Io, t_bool(1)) :-
-    nth0(_, Elts, Object).
-m___contains__([t_list(Elts), Object], _Io, t_bool(0)) :-
-    not(nth0(_, Elts, Object)).
+m___contains__([t_list(Elts), Object], _Io, t_bool(R)) :-
+    nth0(_, Elts, Object), !, R = 1.
+m___contains__([t_list(_), _], _Io, t_bool(0)).
+m___contains__([t_str(Full), t_str(Sub)], _Io, t_bool(R)) :-
+    append(_, Sub, T0), append(T0, _, Full), !, R = 1.
+m___contains__([t_str(_), t_str(_)], _Io, t_bool(0)).
 
 
 i_return(Var, Var).
@@ -1155,7 +1157,17 @@ m_endswith([t_str(_), t_str(_)], _Io, t_bool(0)).
 m_startswith([t_str(Str), t_str(Prefix)], _Io, t_bool(R)) :-
     append(Prefix, _, Str), !, R = 1.
 m_startswith([t_str(_), t_str(_)], _Io, t_bool(0)).
+m_join([t_str(Sep), t_list(Strs)], _Io, t_str(Result)) :-
+    join_strs(Sep, Strs, [], Result).
 
+join_strs(_, [t_str(H)], Acc, Result) :-
+    !,
+    append(Acc, H, Result).
+join_strs(Sep, [t_str(H)|T], Acc, Result) :-
+    append(Acc, H, T0),
+    append(T0, Sep, NextAcc),
+    join_strs(Sep, T, NextAcc, Result).
+join_strs(_, [], Result, Result).
 
 to_print_string([], Acc, t_str(Acc)).
 to_print_string([H|T], Acc, Result) :-
