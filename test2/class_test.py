@@ -89,4 +89,4 @@ def main():
     class_test6_deconstruct_object()
     class_test7_multiply_referenced()
     class_test8_inheritance()
-    print(1)
+    print("class_test")

@@ -45,7 +45,7 @@ class Y:
         self._a = a
         self._b = b
 
-def func2(y: Y(Y(1, 2), b), x):
+def func2(y: Y(Y(1, ~"2?"), b), x):
     return 0
 
 def func2(y: Y(a, b), x):
@@ -59,7 +59,8 @@ def func2(y, x):
     return 3
 
 def dispatch_test2_match_in_arg_list():
-    assert func2(Y(Y(1, 2), 3), 0) == 0
+    assert func2(Y(Y(1, "20"), 3), 0) == 0
+    assert func2(Y(Y(1, "23"), 3), 0) == 0
     assert func2(Y(Y(2, 3), 4), 0) == 1
     assert func2(Y(10, 20), 0) == 1
     assert func2(2, 1) == 2
@@ -104,4 +105,4 @@ def main():
     dispatch_test3_out_argument()
     dispatch_test4_out_argument_with_overloads()
 
-    print(1)
+    print("dispatch_test")

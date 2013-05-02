@@ -12,6 +12,10 @@ def list_test1_index_list():
     assert l[1] == 2
     assert l[2] == 3
     assert l[3] == 4
+    assert l[-1] == 4
+    assert l[-2] == 3
+    assert l[-3] == 2
+    assert l[-4] == 1
 
 def list_test2_append_element():
     l = [1]
@@ -64,6 +68,9 @@ def list_test8_in():
     assert 3 in l
     assert not (5 in l)
 
+def list_test9_type():
+    assert type([]) == list
+
 def main():
     list_test0_length_of_list()
     list_test1_index_list()
@@ -74,4 +81,5 @@ def main():
     list_test6_assign_element()
     list_test7_multiply_referenced()
     list_test8_in()
-    print(1)
+    list_test9_type()
+    print("list_test")

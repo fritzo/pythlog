@@ -92,4 +92,4 @@ def main():
     if_test5_return_in_both_branches()
     if_test6_return_in_then_branch()
     if_test7_return_in_else_branch()
-    print(1)
+    print("if_test")

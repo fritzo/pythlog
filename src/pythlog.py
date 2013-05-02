@@ -266,6 +266,9 @@ class StatementTranslator(ast.NodeVisitor):
     def visit_Num(self, node):
         return "t_int(%s)" % node.n
 
+    def visit_Str(self, node):
+        return 't_str("%s")' % node.s
+
     def visit_Index(self, node):
         return self.visit(node.value)
 
@@ -1003,9 +1006,12 @@ i_cmpgte(t_int(L), t_int(R), t_bool(Result)) :-
     Result #<==> (L #>= R).
 i_cmplte(t_int(L), t_int(R), t_bool(Result)) :-
     Result #<==> (L #=< R).
-i_cmpin(Object, t_list(Elts), t_bool(1)) :-
+i_cmpin(Object0, Object1, Result) :-
+    m___contains__([Object1, Object0], _Io, Result).
+
+m___contains__([t_list(Elts), Object], _Io, t_bool(1)) :-
     nth0(_, Elts, Object).
-i_cmpin(Object, t_list(Elts), t_bool(0)) :-
+m___contains__([t_list(Elts), Object], _Io, t_bool(0)) :-
     not(nth0(_, Elts, Object)).
 
 
@@ -1029,12 +1035,16 @@ update_attr(IsAssigned, Name, Value, [AttrName=AttrValue|Attrs], [AttrName=Updat
     ),
     update_attr(NextIsAssigned, Name, Value, Attrs, NewAttrs).
 
+m___add__([t_str(L), t_str(R)], _, t_str(Result)) :-
+    append(L, R, Result).
 m___add__([t_list(L), t_list(R)], _, t_list(Result)) :-
     append(L, R, Result).
 m___add__([t_int(L), t_int(R)], _Io, t_int(Result)) :-
     Result #= L + R.
 m___radd__([t_int(R), t_int(L)], _Io, t_int(Result)) :-
     Result #= L + R.
+m___sub__([t_str(L), t_str(R)], _, t_str(Result)) :-
+    append(Result, R, L).
 m___sub__([t_list(L), t_list(R)], _, t_list(Result)) :-
     append(Result, R, L).
 m___sub__([t_int(L), t_int(R)], _Io, t_int(Result)) :-
@@ -1090,8 +1100,16 @@ m___neg__([t_int(I)], _Io, t_int(Neg)) :-
     Neg #= -I.
 m___invert__([t_int(I)], _Io, t_int(Result)) :-
     Result #= -I -1.
+m___invert__([t_str(InChars)], _Io, t_str(OutChars)) :-
+    questionmark_to_freevar(InChars, OutChars).
 
-
+% '?' == 63
+questionmark_to_freevar([63|InChars], [_|OutChars]) :-
+    !, questionmark_to_freevar(InChars, OutChars).
+questionmark_to_freevar([H|InChars], [H|OutChars]) :-
+    questionmark_to_freevar(InChars, OutChars).
+questionmark_to_freevar([], []).
+    
 no_sign(I, Is) :-
     I #< 0,
     Is #= {max_bit_val} + I.
@@ -1114,6 +1132,14 @@ nth0_replace([H|T], Idx, Item, [H|R]) :-
 
 m___getitem__([t_list(Elts), t_int(I)], _Io, Result) :-
     nth0(I, Elts, Result).
+m___getitem__([t_str(Chars), t_int(I)], _Io, t_str([Char])) :-
+    nth0(I, Chars, Char).
+m___getitem__([Object, t_int(NegIdx)], Io, Result) :-
+    NegIdx #< 0,
+    g_len([Object], Io, t_int(Length)),
+    PosIdx #= Length + NegIdx,
+    m___getitem__([Object, t_int(PosIdx)], Io, Result).
+
 m_append([List, Element], _Io, g_None) :-
     List = t_list(Es),
     append(Es, [Element], NewEs),
@@ -1122,6 +1148,14 @@ m_extend([List, t_list(XList)], _Io, g_None) :-
     List = t_list(Es),
     append(Es, XList, NewEs),
     setarg(1, List, NewEs).
+
+m_endswith([t_str(Str), t_str(Suffix)], _Io, t_bool(R)) :-
+    append(_, Suffix, Str), !, R = 1.
+m_endswith([t_str(_), t_str(_)], _Io, t_bool(0)).
+m_startswith([t_str(Str), t_str(Prefix)], _Io, t_bool(R)) :-
+    append(Prefix, _, Str), !, R = 1.
+m_startswith([t_str(_), t_str(_)], _Io, t_bool(0)).
+
 
 to_print_string([], Acc, t_str(Acc)).
 to_print_string([H|T], Acc, Result) :-
@@ -1137,7 +1171,7 @@ g_print(Objects, Io, g_None) :-
     append(List, [Str], Result),
     setarg(1, Io, Result).
 
-m___str__(u, u).
+m___str__([t_str(Chars)]    , t_str(Chars)).
 m___repr__([t_bool(0)], t_str("False")).
 m___repr__([t_bool(1)], t_str("True")).
 m___repr__([t_int(I)], t_str(Repr)) :-
@@ -1180,10 +1214,16 @@ repr_list([H|T], Acc, Res) :-
     repr_list(T, NextAcc, Res).
 
 
-
+g_type([t_str(_)], _Io, g_str).
+g_type([t_list(_)], _Io, g_list).
 g_type([t_int(_)], _Io, g_int).
 g_type([t_object(Type, _Attrs, _Ref)], _Io, Type).
-g_len([t_list(Elts)], _Io, t_int(L)) :-
+g_len([Object], Io, Result) :-
+    m___len__([Object], Io, Result).
+
+m___len__([t_list(Elts)], _Io, t_int(L)) :-
+    length(Elts, L).
+m___len__([t_str(Elts)], _Io, t_int(L)) :-
     length(Elts, L).
 
 
