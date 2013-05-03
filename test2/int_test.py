@@ -109,6 +109,10 @@ def int_test11_type():
     assert type(x) == int
     assert x == 1
 
+def int_test12_comparisons():
+    assert 1 < 2
+    assert 1 <= 2
+    assert 2 == 2
 
 
 def fac(n):
@@ -137,6 +141,7 @@ def main():
     int_test9_bit_or()
     int_test10_bit_xor()
     int_test11_type()
+    int_test12_comparisons()
     int_test20_factorial()
     print("int_test")
 

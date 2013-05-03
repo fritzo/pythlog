@@ -998,12 +998,15 @@ i_cmpnoteq(t_int(L), t_int(R), t_bool(Result)) :-
 i_cmpnoteq(O, O, t_bool(0)).
 i_cmpnoteq(L, R, t_bool(1)) :-
     L \= R. % TODO: reify unification to boolean result!
-i_cmplt(t_int(L), t_int(R), t_bool(Result)) :-
-    Result #<==> (L #< R).
+i_cmplt(Lhs, Rhs, Result) :-
+    m___lt__([Lhs, Rhs], _Io, Result).
 i_cmpgt(t_int(L), t_int(R), t_bool(Result)) :-
     Result #<==> (L #> R).
 i_cmpgte(t_int(L), t_int(R), t_bool(Result)) :-
     Result #<==> (L #>= R).
+i_cmplte(Lhs, Rhs, Result) :-
+    m___le__([Lhs, Rhs], _Io, Result).
+
 i_cmplte(t_int(L), t_int(R), t_bool(Result)) :-
     Result #<==> (L #=< R).
 i_cmpin(Object0, Object1, Result) :-
@@ -1105,6 +1108,11 @@ m___invert__([t_int(I)], _Io, t_int(Result)) :-
 m___invert__([t_str(InChars)], _Io, t_str(OutChars)) :-
     questionmark_to_freevar(InChars, OutChars).
 
+m___lt__([t_int(L), t_int(R)], _Io, t_bool(Result)) :-
+    Result #<==> (L #< R).
+m___le__([t_int(L), t_int(R)], _Io, t_bool(Result)) :-
+    Result #<==> (L #=< R).
+
 % '?' == 63
 questionmark_to_freevar([63|InChars], [_|OutChars]) :-
     !, questionmark_to_freevar(InChars, OutChars).
@@ -1171,7 +1179,7 @@ join_strs(_, [], Result, Result).
 
 to_print_string([], Acc, t_str(Acc)).
 to_print_string([H|T], Acc, Result) :-
-    g_str([H], t_str(HStr)),
+    g_str([H], _Io, t_str(HStr)),
     append(Acc, HStr, NextAcc),
     to_print_string(T, NextAcc, Result).
 
@@ -1183,33 +1191,33 @@ g_print(Objects, Io, g_None) :-
     append(List, [Str], Result),
     setarg(1, Io, Result).
 
-m___str__([t_str(Chars)]    , t_str(Chars)).
-m___repr__([t_bool(0)], t_str("False")).
-m___repr__([t_bool(1)], t_str("True")).
-m___repr__([t_int(I)], t_str(Repr)) :-
+m___str__([t_str(Chars)], _Io, t_str(Chars)).
+m___repr__([t_bool(0)], _Io, t_str("False")).
+m___repr__([t_bool(1)], _Io, t_str("True")).
+m___repr__([t_int(I)], _Io, t_str(Repr)) :-
     integer(I), !,
     number_codes(I, Repr).
-m___repr__([t_int(I)], t_str(Result)) :-
+m___repr__([t_int(I)], _Io, t_str(Result)) :-
     fd_dom(I, Dom), term_to_atom(Dom, DomA), name(DomA, DomS),
     append("?int:", DomS, Result).
-m___repr__([t_object(Type, _Attrs, _Ref)], t_str("?object")) :-
+m___repr__([t_object(Type, _Attrs, _Ref)], _Io, t_str("?object")) :-
     var(Type), !.
-m___repr__([t_object(Type, Attrs, _Ref)], t_str(Repr)) :-
+m___repr__([t_object(Type, Attrs, _Ref)], _Io, t_str(Repr)) :-
     name(Type, [_, _|StrType]), % skip leading 'g_'
     attr_list(Attrs, AttrList),
     append(StrType, "(", T0),
     repr_list(AttrList, T0, T1),
     append(T1, ")", Repr).
-m___repr__([t_list(Es)], t_str(Repr)) :-
+m___repr__([t_list(Es)], _Io, t_str(Repr)) :-
     repr_list(Es, "[", Res),
     append(Res, "]", Repr).
 
-g_str(ArgList, Str) :-
-    m___str__(ArgList, Str), !.
-g_str(ArgList, Str) :-
-    m___repr__(ArgList, Str).
-g_repr(ArgList, Str) :-
-    m___repr__(ArgList, Str).
+g_str(ArgList, Io, Str) :-
+    m___str__(ArgList, Io, Str), !.
+g_str(ArgList, Io, Str) :-
+    m___repr__(ArgList, Io, Str).
+g_repr(ArgList, Io, Str) :-
+    m___repr__(ArgList, Io, Str).
 
 attr_list([], []).
 attr_list([_Name=Value|T], [Value|AT]) :-
@@ -1217,10 +1225,10 @@ attr_list([_Name=Value|T], [Value|AT]) :-
 repr_list([], Acc, Acc).
 repr_list([H], Acc, Res) :-
     !,
-    m___repr__([H], t_str(R)),
+    m___repr__([H], _Io, t_str(R)),
     append(Acc, R, Res).
 repr_list([H|T], Acc, Res) :-
-    m___repr__([H], t_str(R)),
+    m___repr__([H], _Io, t_str(R)),
     append(Acc, R, Tmp),
     append(Tmp, ", ", NextAcc),
     repr_list(T, NextAcc, Res).
