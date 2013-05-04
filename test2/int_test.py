@@ -113,6 +113,8 @@ def int_test12_comparisons():
     assert 1 < 2
     assert 1 <= 2
     assert 2 == 2
+    assert 2 >= 2
+    assert 3 > 2
 
 
 def fac(n):
@@ -127,6 +129,21 @@ def int_test20_factorial():
     n = free
     assert 5040 == fac(n)
     assert n == 7
+
+def wfac(n):
+    assert n >= 0
+    prod = 1
+    while n > 0:
+        prod = prod * n
+        n = n - 1
+    return prod
+
+def int_test21_factorial_using_while():
+    assert wfac(7) == 5040
+    n = free
+    assert 5040 == wfac(n)
+    assert n == 7
+
 
 def main():
     int_test0_add()
@@ -143,6 +160,7 @@ def main():
     int_test11_type()
     int_test12_comparisons()
     int_test20_factorial()
+    int_test21_factorial_using_while()
     print("int_test")
 
 

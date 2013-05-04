@@ -83,6 +83,24 @@ def if_test7_return_in_else_branch():
     assert 0 == return_in_else_branch(0)
     assert 1 == return_in_else_branch(1)
 
+def nested_if(a, b):
+  if a == 0:
+    if b == 0:
+      return 0
+    else:
+      return 1
+  else:
+    if b == 1:
+      return 2
+    else:
+      return 3
+
+def if_test8_nested_if():
+  assert 0 == nested_if(0, 0)
+  assert 1 == nested_if(0, 1)
+  assert 2 == nested_if(1, 0)
+  assert 3 == nested_if(1, 1)
+
 def main():
     if_test0_variable_initialized_in_both_branches()
     if_test1_variable_assigned_in_then_branch()
@@ -92,4 +110,5 @@ def main():
     if_test5_return_in_both_branches()
     if_test6_return_in_then_branch()
     if_test7_return_in_else_branch()
+    if_test8_nested_if()
     print("if_test")

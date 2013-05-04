@@ -494,17 +494,17 @@ class SsaRewriter(NodeTransformer):
         self._allocator = allocator
         self._locals = {}
         self._extra_predicates = []
-        self._loaded_vars = set()
-
-    def visit_Module(self, node):
-        body = self.visit(node.body)
-        return self.copy_node(node, body=body + self._extra_predicates)
+        self._loaded_vars = {}
+        self._stored_vars = {}
 
     def _localvar_index(self, id, locs):
         return int(locs[id][len(id) + 1:])
 
     def _localvar_name(self, id, idx):
         return "L%s%s" % (id, idx)
+
+    def _register_var_used(self, key, ssa_var):
+        self._loaded_vars[key] = ssa_var
 
     def _new_local(self, id):
         if id in self._locals:
@@ -514,6 +514,23 @@ class SsaRewriter(NodeTransformer):
         next_id = self._localvar_name(id, index)
         self._locals[id] = next_id
         return next_id
+
+    def _checkpoint_rw_vars(self):
+        checkpoint = self._loaded_vars, self._stored_vars
+        self._loaded_vars = {}
+        self._stored_vars = {}
+        return checkpoint
+
+    def _restore_checkpoint_rw_vars(self, checkpoint):
+        r, w = checkpoint
+        r.update(self._loaded_vars)
+        w.update(self._stored_vars)
+        self._loaded_vars = r
+        self._stored_vars = w
+
+    def visit_Module(self, node):
+        body = self.visit(node.body)
+        return self.copy_node(node, body=body + self._extra_predicates)
 
     def visit_arg(self, node):
         """
@@ -528,17 +545,75 @@ class SsaRewriter(NodeTransformer):
         body = [self.visit(stmt) for stmt in node.body]
         return self.copy_node(node, args=args, body=body)
 
+    def _extract_expression_to_function(self, node):
+        """
+        Extracts the expression described by the ast node 'node' into
+        a new function. Returns a 'Call' ast node that invokes the extracted
+        function such that 'node' can be replaced by the returned node without
+        changing the behaviour of the function containing 'node'.
+        """
+        checkpoint = self._checkpoint_rw_vars()
+        return_stmt = ast.Return(value=self.visit(node))
+        func_name = self._allocator.globalsym()
+        arg_names = list(self._loaded_vars.values()) + list(self._stored_vars.values())
+
+        func = function_def(func_name, arg_names, [return_stmt])
+        self._extra_predicates.append(func)
+        self._restore_checkpoint_rw_vars(checkpoint)
+        return function_call(func_name, arg_names)
+
+    def visit_While(self, node):
+        """
+        Rewrites a while statement into a call to a recursive function. This
+        rewrite emits two new functions. One is the recursive function that
+        implements the body of the while; the other is the condition of the
+        while.
+        The recursive function has three sets/kinds of arguments:
+            1. local variables read in body of the while
+            2. local variables modified in the body of the while ("accumulators")
+            3. the final result of the modified local variables.
+        """
+        # TODO: The current implementation causes unecessary many checks of the
+        # loop condition.
+        checkpoint = self._checkpoint_rw_vars()
+        locals_before = self._locals.copy()
+        test = self._extract_expression_to_function(node.test)
+        body = [self.visit(stmt) for stmt in node.body]
+
+        in_names = list(locals_before[k] for k in self._loaded_vars.keys())
+        out_names = list(self._stored_vars.values())
+        acc_names = ["Acc" + a for a in out_names]
+        final_names = ["Final" + a for a in out_names]
+        func_name = self._allocator.globalsym() + "while"
+    
+        def_names = in_names + acc_names + final_names
+        end_body = [assignment(d, s) for d, s in zip(final_names, acc_names)]
+        func = function_def(func_name,
+                            def_names,
+                            [assert_expr(test, False)] + end_body)
+        self._extra_predicates.append(func)
+
+        recursive_args = [self._stored_vars.get(k, v) for k, v in self._loaded_vars.items()] + out_names + final_names
+        recursive_call = function_call(func_name, recursive_args)
+
+        func = function_def(func_name,
+                            def_names,
+                            [assert_expr(test, True)] + body + [recursive_call])
+        self._extra_predicates.append(func)
+
+
+        call_names = in_names + acc_names + out_names
+        self._restore_checkpoint_rw_vars(checkpoint)
+        return function_call(func_name, call_names)
+
     def visit_If(self, node):
         """
-        Canonifies if statemenets such that if the then-body assignes a local,
-        so does the else-body (by simply doing a copy if necessary). Furthermore,
-        this function adds a field to the if-node called 'outvars', which is the
-        set of variables assigned by this node.
+        TODO: write this
         """
         # TODO: Horrible mess of code... rewrite!
         test = self.visit(node.test)
 
-        self._loaded_vars = set()
+        checkpoint = self._checkpoint_rw_vars()
         locals_before = self._locals.copy()
         body = [self.visit(stmt) for stmt in node.body]
         locals_after_body = self._locals.copy()
@@ -548,9 +623,9 @@ class SsaRewriter(NodeTransformer):
         locals_after_orelse = self._locals.copy()
         self._locals = locals_before.copy()
 
-        all_vars = set(locals_after_body.keys()).union(set(locals_after_orelse.keys()))
+        all_vars = set(self._loaded_vars.keys()).union(self._stored_vars.keys())
         outvars = set()
-        invars = self._loaded_vars # Variables read by the bodies.
+        invars = set(self._loaded_vars.values()) # Variables read by the bodies.
         for var in all_vars:
             body_idx = self._localvar_index(var, locals_after_body)
             orelse_idx = self._localvar_index(var, locals_after_orelse)
@@ -558,41 +633,35 @@ class SsaRewriter(NodeTransformer):
 
             out_var = self._localvar_name(var, max_idx)
             in_var = self._localvar_name(var, min_idx)
-            assign = assignment(out_var, LocalName(id=in_var, ctx=ast.Load()))
+            assign = assignment(out_var, in_var)
+            self._register_var_used(var, in_var)
             if max_idx > body_idx:
                 body.append(assign)
-                modified = True
             elif max_idx > orelse_idx:
                 orelse.append(assign)
-                modified = True
-            else:
-                modified = False
             self._locals[var] = out_var
-            if modified:
+            if max_idx != body_idx:
                 outvars.add(out_var)
                 invars.add(in_var)
-
-        func_name = self._allocator.globalsym()
+        func_name = self._allocator.globalsym() + "if"
         expr_var = self._allocator.tempvar()
         arg_names = [expr_var] + list(invars) + list(outvars)
-        then_func = function_def(func_name, arg_names, [assert_var(expr_var, True)] + body)
-        else_func = function_def(func_name, arg_names, [assert_var(expr_var, False)] + orelse)
+        then_func = function_def(func_name, arg_names, [assert_expr(expr_var, True)] + body)
+        else_func = function_def(func_name, arg_names, [assert_expr(expr_var, False)] + orelse)
 
         self._extra_predicates.append(then_func)
         self._extra_predicates.append(else_func)
 
-        return ast.Call(func=GlobalName(id=func_name, ctx=ast.Load()),
-                 args=[test] + [LocalName(id=name, ctx=ast.Load()) for name in arg_names[1:]],
-                 keywords=[],
-                 starargs=None,
-                 kwargs=None)
+        self._restore_checkpoint_rw_vars(checkpoint)
+        return function_call(func_name, [test] + arg_names[1:])
 
     def visit_LocalName(self, node):
         if type(node.ctx) == ast.Store:
             id = self._new_local(node.id)
+            self._stored_vars[node.id] = id
         elif node.id in self._locals:
             id = self._locals[node.id]
-            self._loaded_vars.add(id)
+            self._loaded_vars[node.id] = id
         else:
             assert False, node.id
         return self.copy_node(node, id=id)
@@ -603,6 +672,25 @@ class SsaRewriter(NodeTransformer):
         value = self.visit(node.value)
         targets = [self.visit(t) for t in node.targets]
         return self.copy_node(node, targets=targets, value=value)
+
+
+def string_to_ast_node(arg, store=False):
+    if type(arg) == str:
+        ctx = ast.Store() if store else ast.Load()
+        return LocalName(id=arg, ctx=ctx)
+    return arg
+
+def function_call(func_name, args):
+    """
+    Calls 'func_name' (string) with arguments 'args' (list of string or ast
+    nodes).
+    """
+    return ast.Call(func=GlobalName(id=func_name, ctx=ast.Load()),
+                 args=[string_to_ast_node(arg) for arg in args],
+                 keywords=[],
+                 starargs=None,
+                 kwargs=None)
+
 
 def function_def(func_name, arg_names, body):
     """
@@ -644,11 +732,14 @@ def assign_uninitialized(var_name):
     # either g_ or m_.
     return assignment(var_name, value=UNINITIALIZED)
 
-def assignment(var_name, value):
+def assignment(dst, value):
     """
-    Get the ast for assigning 'var_name' to 'value'.
+    Get the ast for assigning 'value' to 'dst' (ast node or
+    string). If strings are provided, then they are wrapped in ast node
+    LocalName.
     """
-    return ast.Assign(targets=[LocalName(id=var_name, ctx=ast.Store())], value=value)
+    return ast.Assign(targets=[string_to_ast_node(dst, store=True)],
+                      value=string_to_ast_node(value))
 
 def assert_equal(lhs, rhs):
     """
@@ -656,12 +747,14 @@ def assert_equal(lhs, rhs):
     """
     return ast.Assert(test=ast.Compare(left=lhs, ops=[ast.Eq()], comparators=[rhs]), msg=None)
 
-def assert_var(var, true_false):
+def assert_expr(expr, true_false):
     """
-    Assert that a variable has either value 'True' or value 'False'.
+    Assert that a expression (a ast node or variable given a string) has
+    either value 'True' or value 'False'.
     """
-    return assert_equal(LocalName(id=var, ctx=ast.Load()),
-                        Bool(b=true_false))
+    if type(expr) == str:
+        expr = LocalName(id=expr, ctx=ast.Load())
+    return assert_equal(expr, Bool(b=true_false))
 
 def ctor_return_stmt():
     """
@@ -695,6 +788,8 @@ class SymbolResolver(NodeTransformer):
     def visit_Name(self, node):
         if node.id == 'free':
             return Free()
+        elif node.id in ('True', 'False'):
+            return Bool(b=eval(node.id))
         # TODO: Global symbol might be chosen instead of local when there is a
         # local symbol and a global symbol wit the same name. This is wrong.
         if node.id in self._globals:
