@@ -217,10 +217,10 @@ class Allocator:
         return "g_%s" % self._alloc_number()
 
 class ModuleTranslator(ast.NodeVisitor):
-    def __init__(self, global_symbols):
+    def __init__(self, global_symbols, allocator):
         self._global_symbols = global_symbols
         self._predicates = []
-        self._allocator = Allocator()
+        self._allocator = allocator
 
     def code(self):
         return "\n\n".join(self._predicates)
@@ -262,6 +262,9 @@ class StatementTranslator(ast.NodeVisitor):
 
     def visit_Free(self, node):
         return '_'
+
+    def visit_Bool(self, node):
+        return "t_bool(%s)" % int(node.b)
 
     def visit_Num(self, node):
         return "t_int(%s)" % node.n
@@ -371,34 +374,6 @@ class StatementTranslator(ast.NodeVisitor):
         self.visit(node.value)
         return self._code
 
-    def visit_If(self, node):
-        # TODO: Move the translation from if to predicate dispatch to a rewrite stage.
-        test = self.visit(node.test)
-
-        st = StatementTranslator(self._allocator, self._globals)
-        for stmt in node.body:
-            st.visit(stmt)
-        body = st.code()
-        self._predicates.extend(st.predicates())
-
-        st = StatementTranslator(self._allocator, self._globals)
-        for stmt in node.orelse:
-            st.visit(stmt)
-        orelse = st.code()
-        self._predicates.extend(st.predicates())
-
-        name = self._allocator.globalsym()
-        args = node.invars + node.outvars + ['Io']
-
-        self._predicates.append(generate_predicate(name,
-                                                   ['t_bool(1)'] + args,
-                                                   body))
-        self._predicates.append(generate_predicate(name,
-                                                   ['t_bool(0)'] + args,
-                                                   orelse))
-        self._code.append('%s(%s, %s)' % (name, test, ", ".join(args)))
-        return self._code
-
 def generate_predicate(name, args, body):
     head = "%s(%s)" % (name, ", ".join(args))
     if len(body) == 0:
@@ -458,6 +433,15 @@ EMPTY_CTOR_DEF = ast.FunctionDef(name='__init__',
                                  decorator_list=[],
                                  returns=None)
 
+class Block(ast.stmt):
+    """
+    Represents several statements as one ast node. Used by visit functions
+    that expand one ast node into several.
+    """
+    def __init__(self, block):
+        ast.stmt.__init__(self, block=block)
+        self._fields = ('block', )
+
 class NewObject(ast.expr):
     """
     Represents the ast for constructing a new object. 
@@ -489,6 +473,14 @@ class Free(ast.expr):
     def __init__(self):
         ast.expr.__init__(self)
 
+class Bool(ast.expr):
+    """
+    Represents the literals 'True' and 'False'.
+    """
+    def __init__(self, b):
+        ast.expr.__init__(self, b=b)
+        self._fields = ('b', )
+
 def maxmin(x, y):
     if x > y:
         return x, y
@@ -498,8 +490,15 @@ class SsaRewriter(NodeTransformer):
     """
     Rewrites code to use single static assignment form.
     """
-    def __init__(self):
+    def __init__(self, allocator):
+        self._allocator = allocator
         self._locals = {}
+        self._extra_predicates = []
+        self._loaded_vars = set()
+
+    def visit_Module(self, node):
+        body = self.visit(node.body)
+        return self.copy_node(node, body=body + self._extra_predicates)
 
     def _localvar_index(self, id, locs):
         return int(locs[id][len(id) + 1:])
@@ -539,6 +538,7 @@ class SsaRewriter(NodeTransformer):
         # TODO: Horrible mess of code... rewrite!
         test = self.visit(node.test)
 
+        self._loaded_vars = set()
         locals_before = self._locals.copy()
         body = [self.visit(stmt) for stmt in node.body]
         locals_after_body = self._locals.copy()
@@ -549,7 +549,8 @@ class SsaRewriter(NodeTransformer):
         self._locals = locals_before.copy()
 
         all_vars = set(locals_after_body.keys()).union(set(locals_after_orelse.keys()))
-        outvars = []
+        outvars = set()
+        invars = self._loaded_vars # Variables read by the bodies.
         for var in all_vars:
             body_idx = self._localvar_index(var, locals_after_body)
             orelse_idx = self._localvar_index(var, locals_after_orelse)
@@ -560,23 +561,38 @@ class SsaRewriter(NodeTransformer):
             assign = assignment(out_var, LocalName(id=in_var, ctx=ast.Load()))
             if max_idx > body_idx:
                 body.append(assign)
+                modified = True
             elif max_idx > orelse_idx:
                 orelse.append(assign)
+                modified = True
+            else:
+                modified = False
             self._locals[var] = out_var
-            outvars.append(out_var)
+            if modified:
+                outvars.add(out_var)
+                invars.add(in_var)
 
-        return self.copy_node(node,
-                              test=test,
-                              body=body,
-                              orelse=orelse,
-                              outvars=outvars,
-                              invars=list(locals_before.values()))
+        func_name = self._allocator.globalsym()
+        expr_var = self._allocator.tempvar()
+        arg_names = [expr_var] + list(invars) + list(outvars)
+        then_func = function_def(func_name, arg_names, [assert_var(expr_var, True)] + body)
+        else_func = function_def(func_name, arg_names, [assert_var(expr_var, False)] + orelse)
+
+        self._extra_predicates.append(then_func)
+        self._extra_predicates.append(else_func)
+
+        return ast.Call(func=GlobalName(id=func_name, ctx=ast.Load()),
+                 args=[test] + [LocalName(id=name, ctx=ast.Load()) for name in arg_names[1:]],
+                 keywords=[],
+                 starargs=None,
+                 kwargs=None)
 
     def visit_LocalName(self, node):
         if type(node.ctx) == ast.Store:
             id = self._new_local(node.id)
         elif node.id in self._locals:
             id = self._locals[node.id]
+            self._loaded_vars.add(id)
         else:
             assert False, node.id
         return self.copy_node(node, id=id)
@@ -587,6 +603,28 @@ class SsaRewriter(NodeTransformer):
         value = self.visit(node.value)
         targets = [self.visit(t) for t in node.targets]
         return self.copy_node(node, targets=targets, value=value)
+
+def function_def(func_name, arg_names, body):
+    """
+    Creates a function definition ast object. Function is named 'func_name'
+    and it takes 'arg_names' arguments (a list of strings). The argument
+    'body' is a list of ast nodes.
+    """
+    arg_list = [ast.arg(arg=name, annotation=None) for name in arg_names]
+    args = ast.arguments(args=arg_list,
+                         vararg=None,
+                         varargannotation=None,
+                         kwonlyargs=[],
+                         kwarg=None,
+                         kwargannotation=None,
+                         defaults=[],
+                         kw_defaults=[])
+    return ast.FunctionDef(name=func_name,
+                           args=args,
+                           body=body,
+                           decorator_list=[],
+                           returns=None)
+
 
 def assert_self_type(type_name):
     """
@@ -613,7 +651,17 @@ def assignment(var_name, value):
     return ast.Assign(targets=[LocalName(id=var_name, ctx=ast.Store())], value=value)
 
 def assert_equal(lhs, rhs):
+    """
+    Assert that 'lhs' is equal to 'rhs'.
+    """
     return ast.Assert(test=ast.Compare(left=lhs, ops=[ast.Eq()], comparators=[rhs]), msg=None)
+
+def assert_var(var, true_false):
+    """
+    Assert that a variable has either value 'True' or value 'False'.
+    """
+    return assert_equal(LocalName(id=var, ctx=ast.Load()),
+                        Bool(b=true_false))
 
 def ctor_return_stmt():
     """
@@ -775,9 +823,9 @@ class ArgListMatchToAssert(NodeTransformer):
         args = self.visit(node.args)
         return self.copy_node(node, args=args, body=self._func_prolog + node.body)
 
-def ssa_form(parse_tree):
+def ssa_form(parse_tree, allocator):
     """Rewrite functions into static single assignment form"""
-    return SsaRewriter().visit(parse_tree)
+    return SsaRewriter(allocator).visit(parse_tree)
 
 def define_type_dependent_builtins(parse_tree):
     """
@@ -800,7 +848,7 @@ def isinstance(obj, type_object):
     return ast.Module(body=parse_tree.body + extras)
 
 
-def resolve_global_symbols(parse_tree):
+def resolve_global_symbols(parse_tree, global_symbols):
     """
     Rename classes and functions such that they don't conflict with prolog
     builtins.
@@ -815,7 +863,7 @@ def resolve_global_symbols(parse_tree):
     Furthermore, some irregularities are rewritten into a canonical form, such
     as not all classes having an explicit constructor.
     """
-    return SymbolResolver(global_symbols(parse_tree)).visit(parse_tree)
+    return SymbolResolver(global_symbols).visit(parse_tree)
 
 def single_return_point(parse_tree):
     """
@@ -841,27 +889,27 @@ def single_return_point(parse_tree):
     """
     return SingleReturnRewriter().visit(parse_tree)
 
-def arg_list_match_to_assert(parse_tree):
+def arg_list_match_to_assert(parse_tree, global_symbols):
     """
     Rewrites
         func(x: Class(a, b)): pass
     to
         func(x): a = free; b = free; assert x == Class(a, b)
     """
-    return ArgListMatchToAssert(global_symbols(parse_tree)).visit(parse_tree)
+    return ArgListMatchToAssert(global_symbols).visit(parse_tree)
 
 def compile_module(module_code):
+    allocator = Allocator()
     parse_tree = ast.parse(module_code)
-    parse_tree = define_type_dependent_builtins(parse_tree)
-    parse_tree = arg_list_match_to_assert(parse_tree)
-    parse_tree = resolve_global_symbols(parse_tree)
-#    print(prettyprint(parse_tree))
-    parse_tree = single_return_point(parse_tree)
-    #print(prettyprint(parse_tree))
-    parse_tree = ssa_form(parse_tree)
-    #print(prettyprint(parse_tree))
+    global_syms = global_symbols(parse_tree)
 
-    compiler = ModuleTranslator(global_symbols(parse_tree))
+    parse_tree = define_type_dependent_builtins(parse_tree)
+    parse_tree = arg_list_match_to_assert(parse_tree, global_syms)
+    parse_tree = resolve_global_symbols(parse_tree, global_syms)
+    parse_tree = single_return_point(parse_tree)
+    parse_tree = ssa_form(parse_tree, allocator)
+
+    compiler = ModuleTranslator(global_syms, allocator)
     compiler.visit(parse_tree)
     return BUILTINS + compiler.code()
 
