@@ -266,6 +266,10 @@ class StatementTranslator(ast.NodeVisitor):
     def visit_Bool(self, node):
         return "t_bool(%s)" % int(node.b)
 
+    def visit_Tuple(self, node):
+        elts = ", ".join(self.visit(e) for e in node.elts)
+        return "t_tuple([%s])" % elts
+
     def visit_Num(self, node):
         return "t_int(%s)" % node.n
 
@@ -1156,11 +1160,14 @@ i_cmpin(Object0, Object1, Result) :-
     m___contains__([Object1, Object0], _Io, Result).
 
 m___contains__([t_list(Elts), Object], _Io, t_bool(R)) :-
-    nth0(_, Elts, Object), !, R = 1.
+    nth0(_, Elts, Object), R = 1.
 m___contains__([t_list(_), _], _Io, t_bool(0)).
 m___contains__([t_str(Full), t_str(Sub)], _Io, t_bool(R)) :-
     append(_, Sub, T0), append(T0, _, Full), !, R = 1.
 m___contains__([t_str(_), t_str(_)], _Io, t_bool(0)).
+m___contains__([t_tuple(Elts), Object], _Io, t_bool(R)) :-
+    nth0(_, Elts, Object), R = 1.
+m___contains__([t_tuple(_), _], _Io, t_bool(0)).
 
 
 i_return(Var, Var).
@@ -1187,6 +1194,8 @@ m___add__([t_str(L), t_str(R)], _, t_str(Result)) :-
     append(L, R, Result).
 m___add__([t_list(L), t_list(R)], _, t_list(Result)) :-
     append(L, R, Result).
+m___add__([t_tuple(L), t_tuple(R)], _, t_tuple(Result)) :-
+    append(L, R, Result).
 m___add__([t_int(L), t_int(R)], _Io, t_int(Result)) :-
     Result #= L + R.
 m___radd__([t_int(R), t_int(L)], _Io, t_int(Result)) :-
@@ -1195,8 +1204,14 @@ m___sub__([t_str(L), t_str(R)], _, t_str(Result)) :-
     append(Result, R, L).
 m___sub__([t_list(L), t_list(R)], _, t_list(Result)) :-
     append(Result, R, L).
+m___sub__([t_tuple(L), t_tuple(R)], _, t_tuple(Result)) :-
+    append(Result, R, L).
 m___sub__([t_int(L), t_int(R)], _Io, t_int(Result)) :-
     Result #= L - R.
+m___mul__([t_int(L), t_int(R)], _Io, t_int(Result)) :-
+    Result #= L * R.
+m___mul__([t_tuple(Es), t_int(R)], _Io, t_tuple(Result)) :-
+    mul_list(Es, R, Es, Result).
 m___mul__([t_int(L), t_int(R)], _Io, t_int(Result)) :-
     Result #= L * R.
 m___rmul__([t_int(R), t_int(L)], _Io, t_int(Result)) :-
@@ -1285,6 +1300,8 @@ nth0_replace([H|T], Idx, Item, [H|R]) :-
 
 m___getitem__([t_list(Elts), t_int(I)], _Io, Result) :-
     nth0(I, Elts, Result).
+m___getitem__([t_tuple(Elts), t_int(I)], _Io, Result) :-
+    nth0(I, Elts, Result).
 m___getitem__([t_str(Chars), t_int(I)], _Io, t_str([Char])) :-
     nth0(I, Chars, Char).
 m___getitem__([Object, t_int(NegIdx)], Io, Result) :-
@@ -1310,6 +1327,28 @@ m_startswith([t_str(Str), t_str(Prefix)], _Io, t_bool(R)) :-
 m_startswith([t_str(_), t_str(_)], _Io, t_bool(0)).
 m_join([t_str(Sep), t_list(Strs)], _Io, t_str(Result)) :-
     join_strs(Sep, Strs, [], Result).
+
+m_count([t_tuple(Es), E], _Io, t_int(R)) :-
+    count_elem(Es, E, 0, R).
+m_index([t_tuple(Es), E], _Io, t_int(R)) :-
+    nth0(R, Es, E).
+
+count_elem([], _, Result, Result).
+count_elem([H|T], E, Acc, Result) :-
+    H \= T,
+    count_elem(T, E, Acc, Result).
+count_elem([H|T], H, Acc, Result) :-
+    NextAcc is Acc + 1,
+    count_elem(T, H, NextAcc, Result).
+
+mul_list(_, 0, _, []).
+mul_list(_, 1, Acc, Acc).
+mul_list(Es, R, Acc, Result) :-
+    append(Acc, Es, NextAcc),
+    NextR #= R - 1,
+    mul_list(Es, NextR, NextAcc, Result).
+
+
 
 join_strs(_, [t_str(H)], Acc, Result) :-
     !,
@@ -1354,6 +1393,9 @@ m___repr__([t_object(Type, Attrs, _Ref)], _Io, t_str(Repr)) :-
 m___repr__([t_list(Es)], _Io, t_str(Repr)) :-
     repr_list(Es, "[", Res),
     append(Res, "]", Repr).
+m___repr__([t_tuple(Es)], _Io, t_str(Repr)) :-
+    repr_list(Es, "(", Res),
+    append(Res, ")", Repr).
 
 g_str(ArgList, Io, Str) :-
     m___str__(ArgList, Io, Str), !.
@@ -1387,6 +1429,8 @@ g_len([Object], Io, Result) :-
 m___len__([t_list(Elts)], _Io, t_int(L)) :-
     length(Elts, L).
 m___len__([t_str(Elts)], _Io, t_int(L)) :-
+    length(Elts, L).
+m___len__([t_tuple(Elts)], _Io, t_int(L)) :-
     length(Elts, L).
 
 

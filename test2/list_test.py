@@ -68,6 +68,10 @@ def list_test8_in():
     assert 3 in l
     assert not (5 in l)
 
+    f = free
+    assert f in l
+    assert f == 1
+
 def list_test9_type():
     assert type([]) == list
 
