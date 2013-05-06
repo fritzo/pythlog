@@ -971,49 +971,21 @@ class IdentifyPatternLiterals(NodeTransformer):
     def __init__(self, globals):
         self._globals = globals
         self._stack = [False]
-        self._replace_it = False
 
     def visit_Name(self, node):
-        if self._replace_it:
-            if node.id == 'it':
-                return It()
-            return node
-        else:
-            self._stack[-1] |= (node.id == 'it')
-            return node
+        if node.id == 'it':
+            self._stack[-1] = True
+            return It()
+        return node
 
     def visit_List(self, node):
         self._stack.append(False)
-        for e in node.elts:
-            self.visit(e) 
+        elts = [self.visit(e) for e in node.elts]
         it_used = self._stack.pop()
         if it_used:
-            assert len(node.elts) == 1
-            self._replace_it = True
-            new_node = Pattern(type='list',
-                               expr=self.visit(node.elts[0]))
-            self._replace_it = False
-            return new_node
-        return node
-
-    def visit_Call(self, node):
-        self._stack.append(False)
-        for a in node.args:
-            self.visit(a) 
-        it_used = self._stack.pop()
-
-        func = node.func
-        if it_used and type(func) == ast.Name and self._globals.get(func.id, None) == 'type':
-            assert len(node.args) == 1
-            self._replace_it = True
-            assert func.id != 'int', "int pattern not supported yet."
-            new_node = Pattern(type=func.id,
-                               expr=self.visit(node.args[0]))
-            self._replace_it = False
-            return new_node
-        
+            assert len(elts) == 1
+            return Pattern(type='list', expr=elts[0])
         return self.copy_node(node)
-
 
 
 def ssa_form(parse_tree, allocator):
@@ -1530,6 +1502,15 @@ g_type([t_int(_)], _Io, g_int).
 g_type([t_object(Type, _Attrs, _Ref)], _Io, Type).
 g_len([Object], Io, Result) :-
     m___len__([Object], Io, Result).
+g_sum([t_list(Es)], _Io, Result) :-
+    list_sum(Es, t_int(0), Result).
+g_sum([t_list(Es), Start], _Io, Result) :-
+    list_sum(Es, Start, Result).
+
+list_sum([], Acc, Acc).
+list_sum([H|T], Acc, Result) :-
+    m___add__([Acc, H], _Io, NextAcc),
+    list_sum(T, NextAcc, Result).
 
 m___len__([t_list(Elts)], _Io, t_int(L)) :-
     length(Elts, L).

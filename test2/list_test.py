@@ -87,7 +87,7 @@ def list_test10_pattern():
     assert [1 in it and len(it) > 3] == [0, 1, 2, 3]
 
     l = [[1], [-1, 0, 1], [0, 1, 2], [1, 2, 3]]
-    p = list(len(it) > 1 and it[0] == 1)
+    p = [len(it) > 1 and it[0] == 1]
     assert l.index(p) == 3
 
     assert len([len(it) < 4] + [len(it) < 2]) < 6
@@ -114,6 +114,12 @@ def list_test10_pattern():
     assert pattern_func([1, 2]) == 2
     assert pattern_func([1, 2, 3]) == 3
 
+    l = [sum(it) == 6]
+    assert l == [1, 2, 3]
+    
+    l = [[1], [2], [3], [4], [5]]
+    assert l.index([3 in it]) == 2
+
 def list_test11_index():
     assert [1, 2, 3].index(1) == 0
     assert [0, 1, 2, 3].index(1) == 1
@@ -122,6 +128,10 @@ def list_test11_index():
 
 def list_test12_count():
     assert [1, 2, 1].count(1) == 2
+
+def list_test13_sum():
+    assert sum([1, 2, 3]) == 6
+    assert sum(["a", "b", "c"], "") == "abc"
 
 def main():
     list_test0_length_of_list()
@@ -137,4 +147,5 @@ def main():
     list_test10_pattern()
     list_test11_index()
     list_test12_count()
+    list_test13_sum()
     print("list_test")

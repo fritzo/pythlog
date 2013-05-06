@@ -71,6 +71,10 @@ def tuple_test8_in():
     assert f in (1, 2)
     assert f == 2
 
+def tuple_test9_pattern():
+    p = tuple(1 in it and 2 in it and len(it) == 2)
+    assert str(p) == "(1, 2)"
+
 def main():
     tuple_test0_length()
     tuple_test1_indexing()
@@ -81,4 +85,5 @@ def main():
     tuple_test6_index()
     tuple_test7_mul()
     tuple_test8_in()
+    tuple_test9_pattern()
     print("tuple_test")
