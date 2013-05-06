@@ -75,6 +75,24 @@ def list_test8_in():
 def list_test9_type():
     assert type([]) == list
 
+def list_test10_pattern():
+    assert [1 in it] == [1]
+    assert [1 in it and len(it) > 3] != [0, 1, 2]
+    assert [1 in it and len(it) > 3] == [0, 1, 2, 3]
+
+    l = [[1], [-1, 0, 1], [0, 1, 2], [1, 2, 3]]
+    p = [len(it) > 1 and it[0] == 1]
+    assert l.index(p) == 3
+
+def list_test11_index():
+    assert [1, 2, 3].index(1) == 0
+    assert [0, 1, 2, 3].index(1) == 1
+    assert [0, 1, [2], 3].index([2]) == 2
+    assert [0, 1, 2, 1].index(1) == 3
+
+def list_test12_count():
+    assert [1, 2, 1].count(1) == 2
+
 def main():
     list_test0_length_of_list()
     list_test1_index_list()
@@ -86,4 +104,7 @@ def main():
     list_test7_multiply_referenced()
     list_test8_in()
     list_test9_type()
+    list_test10_pattern()
+    list_test11_index()
+    list_test12_count()
     print("list_test")

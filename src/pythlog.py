@@ -245,6 +245,15 @@ class StatementTranslator(ast.NodeVisitor):
         self._predicates = []
         self._code = []
 
+    def _emit_list_unify_hook(self, module, expr):
+        # TODO: Consider making attributed variables part of the IR and move
+        # this to a seperate rewrite step.
+        s = StatementTranslator(self._allocator, self._globals)
+        s.visit(assert_expr(expr, True))
+        code = ['It = t_list(Other)'] + s.code()
+        hook = module + ":attr_unify_hook(Attr, Other) :- \n" + ",\n  ".join(code) + "."
+        self._predicates.append(hook)
+
     def code(self):
         return self._code
 
@@ -285,6 +294,16 @@ class StatementTranslator(ast.NodeVisitor):
     def visit_List(self, node):
         elts = ", ".join(self.visit(e) for e in node.elts)
         return "t_list([%s])" % elts
+
+    def visit_ListPat(self, node):
+        result = self._allocator.tempvar()
+        module = self._allocator.globalsym()
+        self._emit_list_unify_hook(module, node.expr)
+        self._code.append('put_attr(%s, %s, [])' % (result, module))
+        return "t_list(%s)" % result
+
+    def visit_It(self, node):
+        return "It"
 
     def visit_Subscript(self, node):
         result = self._allocator.tempvar()
@@ -437,15 +456,6 @@ EMPTY_CTOR_DEF = ast.FunctionDef(name='__init__',
                                  decorator_list=[],
                                  returns=None)
 
-class Block(ast.stmt):
-    """
-    Represents several statements as one ast node. Used by visit functions
-    that expand one ast node into several.
-    """
-    def __init__(self, block):
-        ast.stmt.__init__(self, block=block)
-        self._fields = ('block', )
-
 class NewObject(ast.expr):
     """
     Represents the ast for constructing a new object. 
@@ -476,6 +486,21 @@ class Free(ast.expr):
     """
     def __init__(self):
         ast.expr.__init__(self)
+
+class It(ast.expr):
+    """
+    Represents the ast for the keyword 'it'.
+    """
+    def __init__(self):
+        ast.expr.__init__(self) 
+        
+class ListPat(ast.expr):
+    """
+    Represents the ast for a list pattern.
+    """
+    def __init__(self, expr):
+        ast.expr.__init__(self, expr=expr)
+        self._fields = ('expr', )   
 
 class Bool(ast.expr):
     """
@@ -922,6 +947,32 @@ class ArgListMatchToAssert(NodeTransformer):
         args = self.visit(node.args)
         return self.copy_node(node, args=args, body=self._func_prolog + node.body)
 
+class IdentifyPatternLiterals(NodeTransformer):
+    def __init__(self):
+        self._stack = [False]
+        self._replace_it = False
+
+    def visit_Name(self, node):
+        if self._replace_it:
+            if node.id == 'it':
+                return It()
+            return node
+        else:
+            self._stack[-1] |= (node.id == 'it')
+            return node
+
+    def visit_List(self, node):
+        self._stack.append(False)
+        elts = [self.visit(e) for e in node.elts]
+        it_used = self._stack.pop()
+        if it_used:
+            assert len(elts) == 1
+            self._replace_it = True
+            new_node = ListPat(expr=self.visit(elts[0]))
+            self._replace_it = False
+            return new_node
+        return node
+
 def ssa_form(parse_tree, allocator):
     """Rewrite functions into static single assignment form"""
     return SsaRewriter(allocator).visit(parse_tree)
@@ -997,6 +1048,13 @@ def arg_list_match_to_assert(parse_tree, global_symbols):
     """
     return ArgListMatchToAssert(global_symbols).visit(parse_tree)
 
+def identify_pattern_literals(parse_tree):
+    """
+    Identifies pattern literals (e.g., [8 in it]) such that they
+    get a dedicated ast node.
+    """
+    return IdentifyPatternLiterals().visit(parse_tree)
+
 def compile_module(module_code):
     allocator = Allocator()
     parse_tree = ast.parse(module_code)
@@ -1004,6 +1062,7 @@ def compile_module(module_code):
 
     parse_tree = define_type_dependent_builtins(parse_tree)
     parse_tree = arg_list_match_to_assert(parse_tree, global_syms)
+    parse_tree = identify_pattern_literals(parse_tree)
     parse_tree = resolve_global_symbols(parse_tree, global_syms)
     parse_tree = single_return_point(parse_tree)
     parse_tree = ssa_form(parse_tree, allocator)
@@ -1125,6 +1184,9 @@ i_binbitxor(L, R, Result) :-
     m___rxor__([R, L], _, Result).
 i_boolor(t_bool(1), t_bool(_), t_bool(1)).
 i_boolor(t_bool(_), t_bool(1), t_bool(1)).
+i_booland(t_bool(1), t_bool(1), t_bool(1)).
+i_booland(t_bool(_), t_bool(0), t_bool(0)).
+i_booland(t_bool(0), t_bool(_), t_bool(0)).
 
 i_unaryusub(I, Result) :-
     m___neg__([I], _, Result).
@@ -1326,7 +1388,11 @@ m_join([t_str(Sep), t_list(Strs)], _Io, t_str(Result)) :-
 
 m_count([t_tuple(Es), E], _Io, t_int(R)) :-
     count_elem(Es, E, 0, R).
+m_count([t_list(Es), E], _Io, t_int(R)) :-
+    count_elem(Es, E, 0, R).
 m_index([t_tuple(Es), E], _Io, t_int(R)) :-
+    nth0(R, Es, E).
+m_index([t_list(Es), E], _Io, t_int(R)) :-
     nth0(R, Es, E).
 
 count_elem([], _, Result, Result).
