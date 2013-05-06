@@ -75,14 +75,44 @@ def list_test8_in():
 def list_test9_type():
     assert type([]) == list
 
+def pattern_func(x: [len(it) == 2]):
+    return 2
+
+def pattern_func(x: [len(it) == 3]):
+    return 3
+
 def list_test10_pattern():
     assert [1 in it] == [1]
     assert [1 in it and len(it) > 3] != [0, 1, 2]
     assert [1 in it and len(it) > 3] == [0, 1, 2, 3]
 
     l = [[1], [-1, 0, 1], [0, 1, 2], [1, 2, 3]]
-    p = [len(it) > 1 and it[0] == 1]
+    p = list(len(it) > 1 and it[0] == 1)
     assert l.index(p) == 3
+
+    assert len([len(it) < 4] + [len(it) < 2]) < 6
+
+    l = [it[0] == 1 and it[1] == 2]
+    assert l[0] == 1
+    assert l[1] == 2
+    
+    elem = 10
+    l = [it[0] == elem]
+    assert str(l[0]) == "10"
+
+    e0 = free
+    e1 = free
+    l0 = [it[0] == e0 and it[1] == e1]
+    l1 = [it[0] == e1 and it[1] == e0]
+    assert l0 == [1, 2]
+    assert str(l1[0]) == "2"
+    assert str(l1[1]) == "1"
+
+    l = [it.index(0) < it.index(10)]
+    assert l == [1, 2, 0, 4, 5, 10]
+
+    assert pattern_func([1, 2]) == 2
+    assert pattern_func([1, 2, 3]) == 3
 
 def list_test11_index():
     assert [1, 2, 3].index(1) == 0

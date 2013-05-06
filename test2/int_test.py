@@ -116,6 +116,16 @@ def int_test12_comparisons():
     assert 2 >= 2
     assert 3 > 2
 
+def int_test13_pattern():
+    pass
+#    p0 = int(it > 0)
+#    assert p0 ** 2 == 64
+#    print(p0)
+#    assert p0 == 8
+
+#    p1 = int(it < 0)
+#    assert p1 ** 2 == 64
+#    assert p1 == -8
 
 def fac(n):
     assert n >= 0
@@ -144,7 +154,6 @@ def int_test21_factorial_using_while():
     assert 5040 == wfac(n)
     assert n == 7
 
-
 def main():
     int_test0_add()
     int_test1_sub()
@@ -159,6 +168,7 @@ def main():
     int_test10_bit_xor()
     int_test11_type()
     int_test12_comparisons()
+    int_test13_pattern()
     int_test20_factorial()
     int_test21_factorial_using_while()
     print("int_test")

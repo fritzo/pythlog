@@ -60,19 +60,25 @@ class NodeVisitor(ast.NodeVisitor):
             return ast.NodeTransformer.visit(self, node)
 
 
-pythlog_builtlins = "write".split()
+PYTHLOG_BUILTINS = {'write':'function'}
 class FindGlobalSymbols(ast.NodeVisitor):
     def __init__(self):
-        self._symbols = set()
+        self._symbols = {}
 
     def global_symbols(self):
-        return set(list(self._symbols) + dir(__builtins__) + pythlog_builtlins)
+        self._symbols.update(PYTHLOG_BUILTINS)
+        for name, value in __builtins__.__dict__.items():
+            if type(value) == type(int) and name != 'type':
+                self._symbols[name] = 'type'
+            else:
+                self._symbols[name] = 'function'
+        return self._symbols
 
     def visit_FunctionDef(self, node):
-        self._symbols.add(node.name)
+        self._symbols[node.name] = 'function'
 
     def visit_ClassDef(self, node):
-        self._symbols.add(node.name)
+        self._symbols[node.name] = 'type'
 
 def global_symbols(parse_tree):
     """
@@ -85,17 +91,29 @@ def global_symbols(parse_tree):
 class FindAllNames(ast.NodeVisitor):
     def __init__(self):
         self.names = set()
+        self.local_names = set()
 
     def visit_Name(self, node):
         self.names.add(node.id)
 
+    def visit_LocalName(self, node):
+        self.local_names.add(node.id)
+
 def all_names_in(parse_tree):
     """
-    Finds all names in a given parse tree.
+    Finds all names (ast.Name) in a given parse tree.
     """
     f = FindAllNames()
     f.visit(parse_tree)
     return f.names
+
+def all_local_names_in(parse_tree):
+    """
+    Find all local names (LocalName) in a given parse tree.
+    """
+    f = FindAllNames()
+    f.visit(parse_tree)
+    return f.local_names
 
 class FindInheritance(NodeVisitor):
     """
@@ -245,13 +263,14 @@ class StatementTranslator(ast.NodeVisitor):
         self._predicates = []
         self._code = []
 
-    def _emit_list_unify_hook(self, module, expr):
+    def _emit_list_unify_hook(self, module, expr, local_vars):
         # TODO: Consider making attributed variables part of the IR and move
         # this to a seperate rewrite step.
         s = StatementTranslator(self._allocator, self._globals)
         s.visit(assert_expr(expr, True))
-        code = ['It = t_list(Other)'] + s.code()
-        hook = module + ":attr_unify_hook(Attr, Other) :- \n" + ",\n  ".join(code) + "."
+        prologue = ['It = t_list(Other)', "[%s] = Attr" % ", ".join(local_vars)]
+        code = prologue + s.code()
+        hook = module + ":attr_unify_hook(Attr, Other) :- \n  " + ",\n  ".join(code) + "."
         self._predicates.append(hook)
 
     def code(self):
@@ -295,12 +314,13 @@ class StatementTranslator(ast.NodeVisitor):
         elts = ", ".join(self.visit(e) for e in node.elts)
         return "t_list([%s])" % elts
 
-    def visit_ListPat(self, node):
+    def visit_Pattern(self, node):
         result = self._allocator.tempvar()
         module = self._allocator.globalsym()
-        self._emit_list_unify_hook(module, node.expr)
-        self._code.append('put_attr(%s, %s, [])' % (result, module))
-        return "t_list(%s)" % result
+        local_vars = all_local_names_in(node.expr)
+        self._emit_list_unify_hook(module, node.expr, local_vars)
+        self._code.append('put_attr(%s, %s, [%s])' % (result, module, ", ".join(local_vars)))
+        return "t_%s(%s)" % (node.type, result)
 
     def visit_It(self, node):
         return "It"
@@ -494,13 +514,13 @@ class It(ast.expr):
     def __init__(self):
         ast.expr.__init__(self) 
         
-class ListPat(ast.expr):
+class Pattern(ast.expr):
     """
-    Represents the ast for a list pattern.
+    Represents the ast for a pattern literal, e.g., [1 in it].
     """
-    def __init__(self, expr):
-        ast.expr.__init__(self, expr=expr)
-        self._fields = ('expr', )   
+    def __init__(self, type, expr):
+        ast.expr.__init__(self, type=type, expr=expr)
+        self._fields = ('type', 'expr')
 
 class Bool(ast.expr):
     """
@@ -934,7 +954,7 @@ class ArgListMatchToAssert(NodeTransformer):
         if node.annotation is None:
             return node
 
-        new_free_vars = all_names_in(node.annotation) - self._globals - self._current_args
+        new_free_vars = all_names_in(node.annotation) - (self._globals.keys()) - self._current_args
         for var in new_free_vars:
             self._func_prolog.append(assignment(var, ast.Name('free', ast.Load())))
         self._func_prolog.append(assert_equal(ast.Name(node.arg, ast.Load()), node.annotation))
@@ -948,7 +968,8 @@ class ArgListMatchToAssert(NodeTransformer):
         return self.copy_node(node, args=args, body=self._func_prolog + node.body)
 
 class IdentifyPatternLiterals(NodeTransformer):
-    def __init__(self):
+    def __init__(self, globals):
+        self._globals = globals
         self._stack = [False]
         self._replace_it = False
 
@@ -963,15 +984,37 @@ class IdentifyPatternLiterals(NodeTransformer):
 
     def visit_List(self, node):
         self._stack.append(False)
-        elts = [self.visit(e) for e in node.elts]
+        for e in node.elts:
+            self.visit(e) 
         it_used = self._stack.pop()
         if it_used:
-            assert len(elts) == 1
+            assert len(node.elts) == 1
             self._replace_it = True
-            new_node = ListPat(expr=self.visit(elts[0]))
+            new_node = Pattern(type='list',
+                               expr=self.visit(node.elts[0]))
             self._replace_it = False
             return new_node
         return node
+
+    def visit_Call(self, node):
+        self._stack.append(False)
+        for a in node.args:
+            self.visit(a) 
+        it_used = self._stack.pop()
+
+        func = node.func
+        if it_used and type(func) == ast.Name and self._globals.get(func.id, None) == 'type':
+            assert len(node.args) == 1
+            self._replace_it = True
+            assert func.id != 'int', "int pattern not supported yet."
+            new_node = Pattern(type=func.id,
+                               expr=self.visit(node.args[0]))
+            self._replace_it = False
+            return new_node
+        
+        return self.copy_node(node)
+
+
 
 def ssa_form(parse_tree, allocator):
     """Rewrite functions into static single assignment form"""
@@ -1048,12 +1091,12 @@ def arg_list_match_to_assert(parse_tree, global_symbols):
     """
     return ArgListMatchToAssert(global_symbols).visit(parse_tree)
 
-def identify_pattern_literals(parse_tree):
+def identify_pattern_literals(parse_tree, global_symbols):
     """
     Identifies pattern literals (e.g., [8 in it]) such that they
     get a dedicated ast node.
     """
-    return IdentifyPatternLiterals().visit(parse_tree)
+    return IdentifyPatternLiterals(global_symbols).visit(parse_tree)
 
 def compile_module(module_code):
     allocator = Allocator()
@@ -1062,7 +1105,7 @@ def compile_module(module_code):
 
     parse_tree = define_type_dependent_builtins(parse_tree)
     parse_tree = arg_list_match_to_assert(parse_tree, global_syms)
-    parse_tree = identify_pattern_literals(parse_tree)
+    parse_tree = identify_pattern_literals(parse_tree, global_syms)
     parse_tree = resolve_global_symbols(parse_tree, global_syms)
     parse_tree = single_return_point(parse_tree)
     parse_tree = ssa_form(parse_tree, allocator)
