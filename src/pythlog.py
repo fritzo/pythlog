@@ -1210,10 +1210,6 @@ m___sub__([t_int(L), t_int(R)], _Io, t_int(Result)) :-
     Result #= L - R.
 m___mul__([t_int(L), t_int(R)], _Io, t_int(Result)) :-
     Result #= L * R.
-m___mul__([t_tuple(Es), t_int(R)], _Io, t_tuple(Result)) :-
-    mul_list(Es, R, Es, Result).
-m___mul__([t_int(L), t_int(R)], _Io, t_int(Result)) :-
-    Result #= L * R.
 m___rmul__([t_int(R), t_int(L)], _Io, t_int(Result)) :-
     Result #= L * R.
 m___floordiv__([t_int(L), t_int(R)], _Io, t_int(Result)) :-
