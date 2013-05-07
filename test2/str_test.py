@@ -75,6 +75,10 @@ def str_test12_in_equation():
     assert "abcde" == s
     assert "abc" == t
 
+def str_test13_pattern():
+    p = str("hello" in it)
+    assert p == "hello world"
+
 def main():
     str_test0_type()
     str_test1_length()
@@ -89,4 +93,5 @@ def main():
     str_test10_join_equation()
     str_test11_in()
     str_test12_in_equation()
+    str_test13_pattern()
     print("str_test")

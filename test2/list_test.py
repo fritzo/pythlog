@@ -82,7 +82,7 @@ def pattern_func(x: [len(it) == 3]):
     return 3
 
 def list_test10_pattern():
-    assert [1 in it] == [1]
+    assert list(1 in it) == [1]
     assert [1 in it and len(it) > 3] != [0, 1, 2]
     assert [1 in it and len(it) > 3] == [0, 1, 2, 3]
 

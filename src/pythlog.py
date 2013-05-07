@@ -263,12 +263,13 @@ class StatementTranslator(ast.NodeVisitor):
         self._predicates = []
         self._code = []
 
-    def _emit_list_unify_hook(self, module, expr, local_vars):
+    def _emit_list_unify_hook(self, module, node, local_vars):
         # TODO: Consider making attributed variables part of the IR and move
         # this to a seperate rewrite step.
         s = StatementTranslator(self._allocator, self._globals)
-        s.visit(assert_expr(expr, True))
-        prologue = ['It = t_list(Other)', "[%s] = Attr" % ", ".join(local_vars)]
+        s.visit(assert_expr(node.expr, True))
+        prologue = ['It = t_%s(Other)' % node.type,
+                    '[%s] = Attr' % ', '.join(local_vars)]
         code = prologue + s.code()
         hook = module + ":attr_unify_hook(Attr, Other) :- \n  " + ",\n  ".join(code) + "."
         self._predicates.append(hook)
@@ -318,7 +319,7 @@ class StatementTranslator(ast.NodeVisitor):
         result = self._allocator.tempvar()
         module = self._allocator.globalsym()
         local_vars = all_local_names_in(node.expr)
-        self._emit_list_unify_hook(module, node.expr, local_vars)
+        self._emit_list_unify_hook(module, node, local_vars)
         self._code.append('put_attr(%s, %s, [%s])' % (result, module, ", ".join(local_vars)))
         return "t_%s(%s)" % (node.type, result)
 
@@ -967,25 +968,30 @@ class ArgListMatchToAssert(NodeTransformer):
         args = self.visit(node.args)
         return self.copy_node(node, args=args, body=self._func_prolog + node.body)
 
+
+def is_pattern_expr(node):
+    ok = (isinstance(node, ast.Compare) or isinstance(node, ast.BoolOp))
+    return ok and ("it" in all_names_in(node))
+
 class IdentifyPatternLiterals(NodeTransformer):
     def __init__(self, globals):
-        self._globals = globals
-        self._stack = [False]
+        pass
 
     def visit_Name(self, node):
         if node.id == 'it':
-            self._stack[-1] = True
             return It()
         return node
 
     def visit_List(self, node):
-        self._stack.append(False)
-        elts = [self.visit(e) for e in node.elts]
-        it_used = self._stack.pop()
-        if it_used:
-            assert len(elts) == 1
-            return Pattern(type='list', expr=elts[0])
+        if len(node.elts) == 1 and is_pattern_expr(node.elts[0]):
+            return Pattern(type='list', expr=self.visit(node.elts[0]))
         return self.copy_node(node)
+
+    def visit_Call(self, node):
+        if type(node.func) == ast.Name and len(node.args) == 1 and is_pattern_expr(node.args[0]):
+            return Pattern(type=node.func.id, expr=self.visit(node.args[0]))
+        return self.copy_node(node)
+
 
 
 def ssa_form(parse_tree, allocator):
