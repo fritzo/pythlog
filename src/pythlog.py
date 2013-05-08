@@ -60,25 +60,19 @@ class NodeVisitor(ast.NodeVisitor):
             return ast.NodeTransformer.visit(self, node)
 
 
-PYTHLOG_BUILTINS = {'write':'function'}
+PYTHLOG_BUILTINS = {'write'}
 class FindGlobalSymbols(ast.NodeVisitor):
     def __init__(self):
-        self._symbols = {}
+        self._symbols = set()
 
     def global_symbols(self):
-        self._symbols.update(PYTHLOG_BUILTINS)
-        for name, value in __builtins__.__dict__.items():
-            if type(value) == type(int) and name != 'type':
-                self._symbols[name] = 'type'
-            else:
-                self._symbols[name] = 'function'
-        return self._symbols
+        return self._symbols.union(PYTHLOG_BUILTINS).union(dir(__builtins__))
 
     def visit_FunctionDef(self, node):
-        self._symbols[node.name] = 'function'
+        self._symbols.add(node.name)
 
     def visit_ClassDef(self, node):
-        self._symbols[node.name] = 'type'
+        self._symbols.add(node.name)
 
 def global_symbols(parse_tree):
     """
@@ -955,7 +949,7 @@ class ArgListMatchToAssert(NodeTransformer):
         if node.annotation is None:
             return node
 
-        new_free_vars = all_names_in(node.annotation) - (self._globals.keys()) - self._current_args
+        new_free_vars = all_names_in(node.annotation) - self._globals - self._current_args
         for var in new_free_vars:
             self._func_prolog.append(assignment(var, ast.Name('free', ast.Load())))
         self._func_prolog.append(assert_equal(ast.Name(node.arg, ast.Load()), node.annotation))
@@ -1512,6 +1506,9 @@ g_sum([t_list(Es)], _Io, Result) :-
     list_sum(Es, t_int(0), Result).
 g_sum([t_list(Es), Start], _Io, Result) :-
     list_sum(Es, Start, Result).
+g_iter([Object], Io, Result) :-
+    m___iter__([Object], Io, Result).
+g_iter([Callable, t_tuple(CallArgs)], _Io, t_solutions_iterator(Callable, CallArgs)).
 
 list_sum([], Acc, Acc).
 list_sum([H|T], Acc, Result) :-
@@ -1524,7 +1521,15 @@ m___len__([t_str(Elts)], _Io, t_int(L)) :-
     length(Elts, L).
 m___len__([t_tuple(Elts)], _Io, t_int(L)) :-
     length(Elts, L).
-
+m___iter__([t_list(Elts)], _Io, t_list_iterator(Elts)).
+m___next__([Iter], _Io, Result) :-
+    Iter = t_list_iterator(Elts),
+    [Result|Rest] = Elts,
+    setarg(1, Iter, Rest).
+m___next__([t_list_iterator([])], _Io, g_StopIteration).
+m___next__([t_solutions_iterator(Callable, CallArgs)], Io, Result) :-
+    Func =.. [Callable, CallArgs, Io, Result],
+    call(Func).
 
 io_write([]).
 io_write([H|T]) :-

@@ -133,6 +133,30 @@ def list_test13_sum():
     assert sum([1, 2, 3]) == 6
     assert sum(["a", "b", "c"], "") == "abc"
 
+def list_test14_iter():
+    lst = [1, 2, 3, 4]
+    i = iter(lst)
+    l0 = i.__next__()
+    l1 = i.__next__()
+    l2 = i.__next__()
+    l3 = i.__next__()
+    l4 = i.__next__()
+    assert l0 == 1
+    assert l1 == 2
+    assert l2 == 3
+    assert l3 == 4
+    assert l4 == StopIteration
+
+def list_test15_iter_in_while_loop():
+    lst = [1, 2, 3, 4]
+    res = []
+    i = iter(lst)
+    el = i.__next__()
+    while el != StopIteration:
+        res.append(el)
+        el = i.__next__()
+    assert res == lst
+
 def main():
     list_test0_length_of_list()
     list_test1_index_list()
@@ -148,4 +172,6 @@ def main():
     list_test11_index()
     list_test12_count()
     list_test13_sum()
+    list_test14_iter()
+    list_test15_iter_in_while_loop()
     print("list_test")

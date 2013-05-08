@@ -104,5 +104,4 @@ def main():
     dispatch_test2_match_in_arg_list()
     dispatch_test3_out_argument()
     dispatch_test4_out_argument_with_overloads()
-
     print("dispatch_test")
