@@ -1236,9 +1236,12 @@ i_cmplte(t_int(L), t_int(R), t_bool(Result)) :-
 i_cmpin(Object0, Object1, Result) :-
     m___contains__([Object1, Object0], _Io, Result).
 
-m___contains__([t_list(Elts), Object], _Io, t_bool(R)) :-
-    nth0(_, Elts, Object), R = 1.
-m___contains__([t_list(_), _], _Io, t_bool(0)).
+m___contains__([t_range(Start, Stop, Step), t_int(I)], _Io, t_bool(R)) :-
+    R #<==> (I #< Stop #/\ I #>= Start #/\ Start + Step * _ #= I).
+m___contains__([t_list(Elts), Object], _Io, t_bool(1)) :-
+    nth0(_, Elts, Object).
+m___contains__([t_list(Elts), Object], _Io, t_bool(0)) :-
+    not(nth0(_, Elts, Object)).
 m___contains__([t_str(Full), t_str(Sub)], _Io, t_bool(R)) :-
     append(_, Sub, T0), append(T0, _, Full), !, R = 1.
 m___contains__([t_str(_), t_str(_)], _Io, t_bool(0)).
@@ -1371,6 +1374,11 @@ nth0_replace([H|T], Idx, Item, [H|R]) :-
     NextIdx #= Idx - 1,
     nth0_replace(T, NextIdx, Item, R).
 
+m___getitem__([t_range(Start, Stop, Step), t_int(I)], _Io, Result) :-
+    I #>= 0,
+    Start + Step * I #= R,
+    R #< Stop,
+    Result = t_int(R).
 m___getitem__([t_list(Elts), t_int(I)], _Io, Result) :-
     nth0(I, Elts, Result).
 m___getitem__([t_tuple(Elts), t_int(I)], _Io, Result) :-
@@ -1381,6 +1389,7 @@ m___getitem__([Object, t_int(NegIdx)], Io, Result) :-
     NegIdx #< 0,
     g_len([Object], Io, t_int(Length)),
     PosIdx #= Length + NegIdx,
+    PosIdx #>= 0,
     m___getitem__([Object, t_int(PosIdx)], Io, Result).
 
 m_append([List, Element], _Io, g_None) :-
@@ -1499,6 +1508,7 @@ repr_list([H|T], Acc, Res) :-
 g_type([t_str(_)], _Io, g_str).
 g_type([t_list(_)], _Io, g_list).
 g_type([t_int(_)], _Io, g_int).
+g_type([t_range(_, _, _)], _Io, g_range).
 g_type([t_object(Type, _Attrs, _Ref)], _Io, Type).
 g_len([Object], Io, Result) :-
     m___len__([Object], Io, Result).
@@ -1508,13 +1518,23 @@ g_sum([t_list(Es), Start], _Io, Result) :-
     list_sum(Es, Start, Result).
 g_iter([Object], Io, Result) :-
     m___iter__([Object], Io, Result).
-g_iter([Callable, t_tuple(CallArgs)], _Io, t_solutions_iterator(Callable, CallArgs)).
+g_range([t_int(Stop)], _Io, t_range(0, Stop, 1)).
+g_range([t_int(Start), t_int(Stop)], _Io, t_range(Start, Stop, 1)).
+g_range([t_int(Start), t_int(Stop), t_int(Step)], _Io, t_range(Start, Stop, Step)).
+
 
 list_sum([], Acc, Acc).
 list_sum([H|T], Acc, Result) :-
     m___add__([Acc, H], _Io, NextAcc),
     list_sum(T, NextAcc, Result).
 
+% A, B, Max, Min
+sort2(A, B, A, B) :- A #> B.
+sort2(A, B, B, A) :- A #=< B.
+
+m___len__([t_range(Start, Stop, Step)], _Io, t_int(L)) :-
+    sort2(Start, Stop, Low, High),
+    L #= (Low - High - 1) / abs(Step) + 1.
 m___len__([t_list(Elts)], _Io, t_int(L)) :-
     length(Elts, L).
 m___len__([t_str(Elts)], _Io, t_int(L)) :-
@@ -1522,14 +1542,21 @@ m___len__([t_str(Elts)], _Io, t_int(L)) :-
 m___len__([t_tuple(Elts)], _Io, t_int(L)) :-
     length(Elts, L).
 m___iter__([t_list(Elts)], _Io, t_list_iterator(Elts)).
+m___iter__([t_range(L, H, S)], _Io, t_range_iterator(L, H, S)).
+
 m___next__([Iter], _Io, Result) :-
     Iter = t_list_iterator(Elts),
     [Result|Rest] = Elts,
     setarg(1, Iter, Rest).
 m___next__([t_list_iterator([])], _Io, g_StopIteration).
-m___next__([t_solutions_iterator(Callable, CallArgs)], Io, Result) :-
-    Func =.. [Callable, CallArgs, Io, Result],
-    call(Func).
+m___next__([Iter], _Io, t_int(L)) :-
+    t_range_iterator(L, H, S) = Iter,
+    L #< H,
+    NextL #= S + L,
+    setarg(1, Iter, NextL).
+m___next__([t_range_iterator(L, H, _)], _Io, g_StopIteration) :-
+    L #>= H.
+
 
 io_write([]).
 io_write([H|T]) :-
