@@ -40,9 +40,11 @@ def range_test4_iterator():
     e0 = i.__next__()
     e1 = i.__next__()
     e2 = i.__next__()
+    e3 = i.__next__()
     assert e0 == 0
     assert e1 == 1
     assert e2 == 2
+    assert e3 == StopIteration
 
 def main():
     range_test0_type()

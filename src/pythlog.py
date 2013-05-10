@@ -265,8 +265,17 @@ class StatementTranslator(ast.NodeVisitor):
         prologue = ['It = t_%s(Other)' % node.type,
                     '[%s] = Attr' % ', '.join(local_vars)]
         code = prologue + s.code()
-        hook = module + ":attr_unify_hook(Attr, Other) :- \n  " + ",\n  ".join(code) + "."
+        hook = module + ":attr_unify_hook(Attr, Other) :-\n  " + ",\n  ".join(code) + "."
         self._predicates.append(hook)
+
+    def _emit_lazy_list_predicate(self, node_elt, result, iterator):
+        s = StatementTranslator(self._allocator, self._globals)
+        s.visit(node_elt)
+        pred_name = self._allocator.globalsym()
+        sign = "%s(%s, %s)" % (pred_name, result, iterator)
+        pred = sign + " :-\n  " + ",\n  ".join(s.code()) + "."
+        self._predicates.append(pred)
+        return pred_name
 
     def code(self):
         return self._code
@@ -308,6 +317,28 @@ class StatementTranslator(ast.NodeVisitor):
     def visit_List(self, node):
         elts = ", ".join(self.visit(e) for e in node.elts)
         return "t_list([%s])" % elts
+
+    def visit_GeneratorExp(self, node):
+        # TODO: Consider doing a bit of rewriting in an earlier stage to
+        # simplify this code.
+        assert len(node.generators) == 1
+        target = node.generators[0].target[0]
+        pred_name = self._allocator.globalsym()
+        pred_args = ['List', 'Iter', 'Io'] + list(all_local_names_in(node.elt) - {target})
+
+        s = StatementTranslator(self._allocator, self._globals)
+        s.visit(assignment(target, callfunc('m___next__', ['Iter'])))
+        s._code.append('%s \== g_StopIteration -> ([H|T] = List' % target)
+        s.visit(assignment('H', node.elt))
+        s._code.append('freeze(T, %s(T, %s)) ) ; List = []' % (pred_name, ", ".join(pred_args[1:])))
+
+        head = "%s(%s)" % (pred_name, ", ".join(pred_args))
+        self._predicates.append(head + " :-\n  " + ",\n  ".join(s.code()) + ".")
+
+        result = self._allocator.tempvar()
+        iter = self.visit(callfunc('g_iter', [self.visit(node.generators[0].iter)]))
+        self._code.append('%s(%s, %s, %s)' % (pred_name, result, iter, ", ".join(pred_args[2:])))
+        return 't_list(%s)' % result
 
     def visit_Pattern(self, node):
         result = self._allocator.tempvar()
@@ -606,6 +637,12 @@ class SsaRewriter(NodeTransformer):
         self._restore_checkpoint_rw_vars(checkpoint)
         return function_call(func_name, arg_names)
 
+    def visit_comprehension(self, node):
+        # Needs special handling since target is a ast.Name(..., ast.Store()).
+        # Otherwise comprehension target can't be easily mapped to the
+        # comprehension expression (GeneratorExp.elt).
+        return ast.comprehension(target=[self._locals[node.target.id]], iter=self.visit(node.iter))
+
     def visit_While(self, node):
         """
         Rewrites a while statement into a call to a recursive function. This
@@ -775,6 +812,14 @@ def assign_uninitialized(var_name):
     # anything because the SymbolResolver prefixes all global symbols with
     # either g_ or m_.
     return assignment(var_name, value=UNINITIALIZED)
+
+def callfunc(funcname, arglist):
+    args = [string_to_ast_node(a) for a in arglist]
+    return ast.Call(func=string_to_ast_node(funcname),
+                    args=args,
+                    keywords=[],
+                    starargs=None,
+                    kwargs=None)
 
 def assignment(dst, value):
     """
