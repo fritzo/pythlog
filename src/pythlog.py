@@ -318,16 +318,31 @@ class StatementTranslator(ast.NodeVisitor):
         elts = ", ".join(self.visit(e) for e in node.elts)
         return "t_list([%s])" % elts
 
+    def _emit_next_value_for_lazy_list(self, generator, target):
+        pred_name = self._allocator.globalsym()
+        s = StatementTranslator(self._allocator, self._globals)
+        s.visit(assignment(target, callfunc('m___next__', ['Iter'])))
+        if len(generator.ifs) == 1:
+            s.visit(assignment('Comp', generator.ifs[0]))
+            s._code.append("((Comp = t_bool(1)) -> (Result = %s) ; (%s([Iter], Io, Result)))" % (target, pred_name))
+        else:
+            s._code.append('Result = %s' % target)            
+        head = '%s([Iter], Io, Result)' % pred_name
+        code = head + " :-\n  " + ",\n  ".join(s.code()) + "."
+        self._predicates.append(code)
+        return pred_name
+
     def visit_GeneratorExp(self, node):
         # TODO: Consider doing a bit of rewriting in an earlier stage to
         # simplify this code.
         assert len(node.generators) == 1
         target = node.generators[0].target[0]
+        step_iter_pred = self._emit_next_value_for_lazy_list(node.generators[0], target)
         pred_name = self._allocator.globalsym()
-        pred_args = ['List', 'Iter', 'Io'] + list(all_local_names_in(node.elt) - {target})
+        pred_args = ['List', 'Iter', 'Io'] + list(all_local_names_in(node)- {target})
 
         s = StatementTranslator(self._allocator, self._globals)
-        s.visit(assignment(target, callfunc('m___next__', ['Iter'])))
+        s.visit(assignment(target, callfunc(step_iter_pred, ['Iter'])))
         s._code.append('%s \== g_StopIteration -> ([H|T] = List' % target)
         s.visit(assignment('H', node.elt))
         s._code.append('freeze(T, %s(T, %s)) ) ; List = []' % (pred_name, ", ".join(pred_args[1:])))
@@ -641,7 +656,9 @@ class SsaRewriter(NodeTransformer):
         # Needs special handling since target is a ast.Name(..., ast.Store()).
         # Otherwise comprehension target can't be easily mapped to the
         # comprehension expression (GeneratorExp.elt).
-        return ast.comprehension(target=[self._locals[node.target.id]], iter=self.visit(node.iter))
+        return ast.comprehension(target=[self._locals[node.target.id]],
+                                 iter=self.visit(node.iter),
+                                 ifs=self.visit(node.ifs))
 
     def visit_While(self, node):
         """
@@ -1343,6 +1360,8 @@ m___mod__([t_int(L), t_int(R)], _Io, t_int(Result)) :-
     L #< 0, R #< 0, !,
     Result #= -(-L mod -R).
 m___mod__([t_int(L), t_int(R)], _Io, t_int(Result)) :-
+    Result #= L mod R.
+m___rmod__([t_int(R), t_int(L)], _Io, t_int(Result)) :-
     Result #= L mod R.
 m___pow__([t_int(L), t_int(R)], _Io, t_int(Result)) :-
     Result #= L ^ R.
