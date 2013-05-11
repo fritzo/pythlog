@@ -39,7 +39,7 @@ class NodeTransformer(ast.NodeTransformer):
             setattr(new_node, attr, value)
 
         return ast.copy_location(new_node, old_node)
-    
+
 
 class NodeVisitor(ast.NodeVisitor):
     def visit(self, node):
@@ -142,6 +142,9 @@ class PrettyPrinter(NodeVisitor):
     def _deindent(self):
         self._indent_level -= 1
 
+    def visit_List(self, node):
+        return "[" + ", ".join(self.visit(e) for e in node.elts) + "]"
+
     def visit_Num(self, node):
         return str(node.n)
 
@@ -149,6 +152,9 @@ class PrettyPrinter(NodeVisitor):
         return node.id
 
     def visit_GlobalName(self, node):
+        return node.id
+
+    def visit_Name(self, node):
         return node.id
 
     def visit_Compare(self, node):
@@ -161,6 +167,16 @@ class PrettyPrinter(NodeVisitor):
 
     def visit_BinOp(self, node):
         return "binop"
+
+    def visit_While(self, node):
+        test = self.visit(node.test)
+        self._line('while %s:' % test)
+        self._indent()
+        body = self.visit(node.body)
+        self._deindent()
+
+    def visit_Attribute(self, node):
+        return "%s.%s" % (self.visit(node.value), node.attr)
 
     def visit_Pass(self, node):
         self._line("pass")
@@ -477,7 +493,6 @@ def translate_function(func_node, allocator, globals):
 
     st = StatementTranslator(allocator, globals)
     for stmt in func_node.body:
-#            print(ast.dump(stmt))
         st.visit(stmt)
     code.extend(st.code())
     predicates.extend(st.predicates())
@@ -496,7 +511,6 @@ def translate_class(class_node, allocator, globals):
     code. Returns a list of predicates.
     """
     predicates = []
-#    print(ast.dump(class_node))
     for decl in class_node.body:
         if type(decl) != ast.Pass:
             predicates.extend(translate_function(decl, allocator, globals))
@@ -1049,6 +1063,28 @@ class IdentifyPatternLiterals(NodeTransformer):
         return self.copy_node(node)
 
 
+class ForToWhileLoop(NodeTransformer):
+    def __init__(self):
+        self._counter = 0
+
+    def visit_For(self, node):
+        iter_name = '%sfor_iter' % self._counter
+        assign_iter = assignment(ast.Name(iter_name, ast.Store()),
+                                 callfunc(ast.Name('iter', ast.Load()),
+                                          [node.iter]))
+        def next_value(): # Have to do it like this to avoid sharing of nodes
+            return assignment(node.target,
+                              callfunc(ast.Name('next', ast.Load()),
+                                       [ast.Name(iter_name, ast.Load())]))
+        body = node.body + [next_value()]
+        load_target = ast.Name(node.target.id, ast.Load())
+        test = ast.Compare(left=load_target,
+                           ops=[ast.NotEq()],
+                           comparators=[ast.Name(id='StopIteration', ctx=ast.Load())])
+
+        self._counter += 1
+        return [assign_iter, next_value(), ast.While(test=test, body=body, orelse=[])]
+
 
 def ssa_form(parse_tree, allocator):
     """Rewrite functions into static single assignment form"""
@@ -1074,6 +1110,9 @@ def isinstance(obj, type_object):
 
     return ast.Module(body=parse_tree.body + extras)
 
+def for_to_while_loop(parse_tree):
+    """Rewrites for loops into while loops."""
+    return ForToWhileLoop().visit(parse_tree)
 
 def resolve_global_symbols(parse_tree, global_symbols):
     """
@@ -1138,6 +1177,7 @@ def compile_module(module_code):
     global_syms = global_symbols(parse_tree)
 
     parse_tree = define_type_dependent_builtins(parse_tree)
+    parse_tree = for_to_while_loop(parse_tree)
     parse_tree = arg_list_match_to_assert(parse_tree, global_syms)
     parse_tree = identify_pattern_literals(parse_tree, global_syms)
     parse_tree = resolve_global_symbols(parse_tree, global_syms)
@@ -1582,6 +1622,8 @@ g_sum([t_list(Es), Start], _Io, Result) :-
     list_sum(Es, Start, Result).
 g_iter([Object], Io, Result) :-
     m___iter__([Object], Io, Result).
+g_next(Args, Io, Result) :-
+    m___next__(Args, Io, Result).
 g_range([t_int(Stop)], _Io, t_range(0, Stop, 1)).
 g_range([t_int(Start), t_int(Stop)], _Io, t_range(Start, Stop, 1)).
 g_range([t_int(Start), t_int(Stop), t_int(Step)], _Io, t_range(Start, Stop, Step)).

@@ -91,6 +91,10 @@ def lazy_list_test9_len():
     assert len(x for x in range(10)) == 10
     assert len(x for x in range(10) if x % 2 == 0) == 5
 
+def lazy_list_test10_pattern():
+    p = [5 in it]
+    assert p == (x for x in range(10))
+
 def main():
     lazy_list_test0_type()
     lazy_list_test1_index()
@@ -102,4 +106,5 @@ def main():
     lazy_list_test7_assign_element()
     lazy_list_test8_is_lazy_when_used_as_iter()
     lazy_list_test9_len()
+    lazy_list_test10_pattern()
     print("lazy_list_test")
