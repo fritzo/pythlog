@@ -1452,11 +1452,13 @@ m___sub__([t_tuple(L), t_tuple(R)], _, t_tuple(Result)) :-
     append(Result, R, L).
 m___sub__([t_int(L), t_int(R)], _Io, t_int(Result)) :-
     Result #= L - R.
+m___rsub__([u, u], _Io, u). % Place holder to get fail instead of exception.
 m___mul__([t_int(L), t_int(R)], _Io, t_int(Result)) :-
     Result #= L * R.
 m___rmul__([u, u], _Io, u). % Place holder to get fail instead of exception.
 m___floordiv__([t_int(L), t_int(R)], _Io, t_int(Result)) :-
     Result #= L / R.
+m___rfloordiv__([u, u], _Io, u). % Place holder to get fail instead of exception.
 m___mod__([t_int(L), t_int(R)], _Io, t_int(Result)) :-
     L #< 0, R #< 0, !,
     Result #= -(-L mod -R).
@@ -1465,10 +1467,13 @@ m___mod__([t_int(L), t_int(R)], _Io, t_int(Result)) :-
 m___rmod__([u, u], _Io, u). % Place holder to get fail instead of exception.
 m___pow__([t_int(L), t_int(R)], _Io, t_int(Result)) :-
     Result #= L ^ R.
+m___rpow__([u, u], _Io, u).
 m___rshift__([t_int(L), t_int(R)], _Io, t_int(Result)) :-
     Result #= L / (2 ^ R).
+m___rrshift__([u, u], _Io, u). % Place holder to get fail instead of exception.
 m___lshift__([t_int(L), t_int(R)], _Io, t_int(Result)) :-
     Result #= L * (2 ^ R).
+m___rlshift__([u, u], _Io, u). % Place holder to get fail instead of exception.
 m___and__([t_int(L), t_int(R)], _Io, t_int(Result)) :-
     no_sign(L, Ls),
     no_sign(R, Rs),
@@ -1661,7 +1666,8 @@ g_type([t_str(_)], _Io, g_str).
 g_type([t_list(_)], _Io, g_list).
 g_type([t_int(_)], _Io, g_int).
 g_type([t_range(_, _, _)], _Io, g_range).
-g_type([t_object(Type, _Attrs, _Ref)], _Io, Type).
+g_type([t_object(Type, _Attrs, _Ref)], _Io, Type) :-
+    not(member(Type, [g_str, g_list, g_int, g_range])).
 g_len([Object], Io, Result) :-
     m___len__([Object], Io, Result).
 g_sum([t_list(Es)], _Io, Result) :-
@@ -1685,8 +1691,7 @@ list_sum([H|T], Acc, Result) :-
 label_var(t_int(I)) :-
     label([I]).
 label_var(X) :-
-    X \= t_int(_),
-    write(X), nl.
+    X \= t_int(_).
 
 % A, B, Max, Min
 sort2(A, B, A, B) :- A #> B.

@@ -79,6 +79,18 @@ def str_test13_pattern():
     p = str("hello" in it)
     assert p == "hello world"
 
+def str_test14_findall():
+    solutions = [all x in
+                 type(x) == str and
+                 "abc" in x and
+                 "cd" in x and
+                 "cde" in s and
+                 x[0] == "a" and
+                 len(x) == 5]
+    # TODO: this make the test run forever because there are variables left in
+    # 'solutions'. Why?
+    #print(solutions)
+
 def main():
     str_test0_type()
     str_test1_length()
@@ -94,4 +106,5 @@ def main():
     str_test11_in()
     str_test12_in_equation()
     str_test13_pattern()
+    str_test14_findall()
     print("str_test")

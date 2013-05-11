@@ -3,28 +3,31 @@ def int_test0_add():
     assert 6 + 9 == 15
     x = free
     assert x + 8 == 28
-    assert x == 20
+    assert str(x) == "20"
 
 
 def int_test1_sub():
     assert 7 - 2 == 5
     x = free
     assert x - 8 == 20
-    assert x == 28
+    assert str(x) == "28"
 
 
 def int_test2_mult():
     assert 7 * 2 == 14
     x = free
     assert x * 8 == 48
-    assert x == 6
+    assert str(x) == "6"
 
 # TODO: test truediv
 def int_test3_div():
     assert 6 // 2 == 3
+
+    # TODO: must provide additional information to the constraint solver as
+    # 42..47 are all acceptable solutions.
     x = free
     assert x // 6 == 7
-    assert x == 42
+    assert x == 42 
 
 
 def int_test4_mod():
@@ -33,6 +36,8 @@ def int_test4_mod():
     assert 5 % -2 == -1
     assert -5 % -2 == -1
 
+    # TODO: must provide additional information to the constraint solver as
+    # there are several acceptable solutions.
     x = free
     assert x % 2 == 1
     assert x == 3
@@ -41,6 +46,8 @@ def int_test4_mod():
 def int_test5_exp():
     assert 2 ** 10 == 1024
 
+    # TODO: must provide additional information to the constraint solver as
+    # it is not powerful enough to give a definite answer.
     x = free
     assert x ** 10 == 1024
     assert x == 2
@@ -56,8 +63,9 @@ def int_test6_shift():
 
     x = free
     assert x << 8 == 512
-    assert x == 2
+    assert str(x) == "2"
 
+    # TODO: The constraint is not powerful enough to give a definite answer.
     y = free
     assert 2 << y == 128
     assert y == 6
