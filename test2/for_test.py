@@ -8,3 +8,4 @@ def for_test0_range():
 
 def main():
     for_test0_range()
+    print("for_test")

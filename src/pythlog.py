@@ -245,8 +245,7 @@ class Allocator:
         return "g_%s" % self._alloc_number()
 
 class ModuleTranslator(ast.NodeVisitor):
-    def __init__(self, global_symbols, allocator):
-        self._global_symbols = global_symbols
+    def __init__(self, allocator):
         self._predicates = []
         self._allocator = allocator
 
@@ -255,28 +254,25 @@ class ModuleTranslator(ast.NodeVisitor):
 
     def visit_FunctionDef(self, node):
         predicates = translate_function(node,
-                                        self._allocator,
-                                        self._global_symbols)
+                                        self._allocator)
         self._predicates.extend(predicates)
 
     def visit_ClassDef(self, node):
         predicates = translate_class(node,
-                                     self._allocator,
-                                     self._global_symbols)
+                                     self._allocator)
         self._predicates.extend(predicates)
 
 
 class StatementTranslator(ast.NodeVisitor):
-    def __init__(self, allocator, globals):
+    def __init__(self, allocator):
         self._allocator = allocator
-        self._globals = globals
         self._predicates = []
         self._code = []
 
     def _emit_list_unify_hook(self, module, node, local_vars):
         # TODO: Consider making attributed variables part of the IR and move
         # this to a seperate rewrite step.
-        s = StatementTranslator(self._allocator, self._globals)
+        s = StatementTranslator(self._allocator)
         s.visit(assert_expr(node.expr, True))
         prologue = ['It = t_%s(Other)' % node.type,
                     '[%s] = Attr' % ', '.join(local_vars)]
@@ -285,7 +281,7 @@ class StatementTranslator(ast.NodeVisitor):
         self._predicates.append(hook)
 
     def _emit_lazy_list_predicate(self, node_elt, result, iterator):
-        s = StatementTranslator(self._allocator, self._globals)
+        s = StatementTranslator(self._allocator)
         s.visit(node_elt)
         pred_name = self._allocator.globalsym()
         sign = "%s(%s, %s)" % (pred_name, result, iterator)
@@ -334,9 +330,18 @@ class StatementTranslator(ast.NodeVisitor):
         elts = ", ".join(self.visit(e) for e in node.elts)
         return "t_list([%s])" % elts
 
+    def visit_FindAll(self, node):
+        result = self._allocator.tempvar()
+        target = self.visit(node.target)
+        s = StatementTranslator(self._allocator)
+        s.visit(assert_expr(node.expr, True))
+        expr = ", ".join(s._code + ['label_var(%s)' % target])
+        self._code.append('findall(%s, (%s), %s)' % (target, expr, result))
+        return "t_list(%s)" % result
+
     def _emit_next_value_for_lazy_list(self, generator, target):
         pred_name = self._allocator.globalsym()
-        s = StatementTranslator(self._allocator, self._globals)
+        s = StatementTranslator(self._allocator)
         s.visit(assignment(target, callfunc('m___next__', ['Iter'])))
         if len(generator.ifs) == 1:
             s.visit(assignment('Comp', generator.ifs[0]))
@@ -357,7 +362,7 @@ class StatementTranslator(ast.NodeVisitor):
         pred_name = self._allocator.globalsym()
         pred_args = ['List', 'Iter', 'Io'] + list(all_local_names_in(node)- {target})
 
-        s = StatementTranslator(self._allocator, self._globals)
+        s = StatementTranslator(self._allocator)
         s.visit(assignment(target, callfunc(step_iter_pred, ['Iter'])))
         s._code.append('%s \== g_StopIteration -> ([H|T] = List' % target)
         s.visit(assignment('H', node.elt))
@@ -424,7 +429,7 @@ class StatementTranslator(ast.NodeVisitor):
          
 
     def visit_Compare(self, node):
-        assert len(node.ops) == 1
+        assert len(node.ops) == 1, len(node.ops)
         assert len(node.comparators) == 1
         op = type(node.ops[0]).__name__.lower()
         lhs = self.visit(node.left)
@@ -482,7 +487,7 @@ def generate_predicate(name, args, body):
     return head + suffix
 
 
-def translate_function(func_node, allocator, globals):
+def translate_function(func_node, allocator):
     """
     Translates a function (described by the AST node 'func_node') into
     Prolog code. Returns a list of predicates (one function might translate
@@ -491,7 +496,7 @@ def translate_function(func_node, allocator, globals):
     code = []
     predicates = []
 
-    st = StatementTranslator(allocator, globals)
+    st = StatementTranslator(allocator)
     for stmt in func_node.body:
         st.visit(stmt)
     code.extend(st.code())
@@ -505,7 +510,7 @@ def translate_function(func_node, allocator, globals):
                                          code))
     return predicates
 
-def translate_class(class_node, allocator, globals):
+def translate_class(class_node, allocator):
     """
     Translates a class (described by the AST node 'class_node') into Prolog
     code. Returns a list of predicates.
@@ -513,7 +518,7 @@ def translate_class(class_node, allocator, globals):
     predicates = []
     for decl in class_node.body:
         if type(decl) != ast.Pass:
-            predicates.extend(translate_function(decl, allocator, globals))
+            predicates.extend(translate_function(decl, allocator))
     return predicates
 
 
@@ -576,6 +581,14 @@ class Pattern(ast.expr):
     def __init__(self, type, expr):
         ast.expr.__init__(self, type=type, expr=expr)
         self._fields = ('type', 'expr')
+
+class FindAll(ast.expr):
+    """
+    Represents the ast for a findall-expression ([all x in foo])
+    """
+    def __init__(self, target, expr):
+        ast.expr.__init__(self, target=target, expr=expr)
+        self._fields = ('target', 'expr')
 
 class Bool(ast.expr):
     """
@@ -1085,6 +1098,26 @@ class ForToWhileLoop(NodeTransformer):
         self._counter += 1
         return [assign_iter, next_value(), ast.While(test=test, body=body, orelse=[])]
 
+class IdentifyFindallExpressions(NodeTransformer):
+    def visit_List(self, node):
+        # This massive if finds [__findallexpr__ and ...]
+        if (len(node.elts) == 1 and
+            type(node.elts[0]) == ast.BoolOp and
+            type(node.elts[0].op) == ast.And and
+            type(node.elts[0].values[0]) == ast.Name and
+            node.elts[0].values[0].id == '__findallexpr__'):
+            values = node.elts[0].values[1:]
+            assert type(values[0]) == ast.Compare
+            assert type(values[0].ops[0]) == ast.In
+            target = ast.Name(values[0].left.id, ast.Store())
+            left = values[0].comparators[0]
+            ops = values[0].ops[1:]
+            comparators = values[0].comparators[1:]
+            values[0] = ast.Compare(left=left, ops=ops, comparators=comparators)
+            return FindAll(target=target, expr=values[0])
+        else:
+            return node
+
 
 def ssa_form(parse_tree, allocator):
     """Rewrite functions into static single assignment form"""
@@ -1171,11 +1204,40 @@ def identify_pattern_literals(parse_tree, global_symbols):
     """
     return IdentifyPatternLiterals(global_symbols).visit(parse_tree)
 
+def identify_findall_expression(parse_tree):
+    """
+    Identifies a magic sequence of tokens that the preprocessor emits for
+    findall-expressions and instantiates dedicated ast nodes for findall-
+    expressions.
+    """
+    return IdentifyFindallExpressions().visit(parse_tree)
+
+def preprocess(text):
+    """
+    Rewrites the sequence:
+       [all foo in bar]
+    to:
+       [__findallexpr__ and foo in bar]
+    which is later identified as a findall-expression after full parsing.
+    """
+    from tokenize import tokenize, untokenize, NUMBER, STRING, NAME, OP
+    from io import BytesIO
+    result = []
+    last_was_bracket = False
+    g = tokenize(BytesIO(text.encode('utf-8')).readline) # tokenize the string
+    for toknum, tokval, _, _, _  in g:
+        if last_was_bracket and toknum == NAME and tokval == 'all':
+            result.append((NAME, '__findallexpr__ and'))
+        else:
+            result.append((toknum, tokval))
+        last_was_bracket = (toknum == OP and tokval == '[')
+    return untokenize(result).decode('utf-8')
+
 def compile_module(module_code):
     allocator = Allocator()
-    parse_tree = ast.parse(module_code)
+    parse_tree = ast.parse(preprocess(module_code))
     global_syms = global_symbols(parse_tree)
-
+    parse_tree = identify_findall_expression(parse_tree)
     parse_tree = define_type_dependent_builtins(parse_tree)
     parse_tree = for_to_while_loop(parse_tree)
     parse_tree = arg_list_match_to_assert(parse_tree, global_syms)
@@ -1184,7 +1246,7 @@ def compile_module(module_code):
     parse_tree = single_return_point(parse_tree)
     parse_tree = ssa_form(parse_tree, allocator)
 
-    compiler = ModuleTranslator(global_syms, allocator)
+    compiler = ModuleTranslator(allocator)
     compiler.visit(parse_tree)
     return BUILTINS + compiler.code()
 
@@ -1316,7 +1378,8 @@ i_cmpne(t_int(L), t_int(R), t_bool(Result)) :-
     Result #<==> (L #\= R).
 i_cmpeq(t_int(L), t_int(R), t_bool(Result)) :-
     Result #<==> (L #= R).
-i_cmpeq(O, O, t_bool(1)).
+i_cmpeq(O, O, t_bool(1)) :-
+    O \= t_int(_).
 i_cmpeq(L, R, t_bool(0)) :-
     L \= R. % TODO: reify unification to boolean result!
 i_cmpnoteq(t_int(L), t_int(R), t_bool(Result)) :-
@@ -1380,8 +1443,7 @@ m___add__([t_tuple(L), t_tuple(R)], _, t_tuple(Result)) :-
     append(L, R, Result).
 m___add__([t_int(L), t_int(R)], _Io, t_int(Result)) :-
     Result #= L + R.
-m___radd__([t_int(R), t_int(L)], _Io, t_int(Result)) :-
-    Result #= L + R.
+m___radd__([u, u], _Io, u). % Place holder to get fail instead of exception.
 m___sub__([t_str(L), t_str(R)], _, t_str(Result)) :-
     append(Result, R, L).
 m___sub__([t_list(L), t_list(R)], _, t_list(Result)) :-
@@ -1392,8 +1454,7 @@ m___sub__([t_int(L), t_int(R)], _Io, t_int(Result)) :-
     Result #= L - R.
 m___mul__([t_int(L), t_int(R)], _Io, t_int(Result)) :-
     Result #= L * R.
-m___rmul__([t_int(R), t_int(L)], _Io, t_int(Result)) :-
-    Result #= L * R.
+m___rmul__([u, u], _Io, u). % Place holder to get fail instead of exception.
 m___floordiv__([t_int(L), t_int(R)], _Io, t_int(Result)) :-
     Result #= L / R.
 m___mod__([t_int(L), t_int(R)], _Io, t_int(Result)) :-
@@ -1401,8 +1462,7 @@ m___mod__([t_int(L), t_int(R)], _Io, t_int(Result)) :-
     Result #= -(-L mod -R).
 m___mod__([t_int(L), t_int(R)], _Io, t_int(Result)) :-
     Result #= L mod R.
-m___rmod__([t_int(R), t_int(L)], _Io, t_int(Result)) :-
-    Result #= L mod R.
+m___rmod__([u, u], _Io, u). % Place holder to get fail instead of exception.
 m___pow__([t_int(L), t_int(R)], _Io, t_int(Result)) :-
     Result #= L ^ R.
 m___rshift__([t_int(L), t_int(R)], _Io, t_int(Result)) :-
@@ -1414,31 +1474,19 @@ m___and__([t_int(L), t_int(R)], _Io, t_int(Result)) :-
     no_sign(R, Rs),
     {int_and_body},
     fix_sign(UnsignedResult, Result).
-m___rand__([t_int(R), t_int(L)], _Io, t_int(Result)) :-
-    no_sign(L, Ls),
-    no_sign(R, Rs),
-    {int_and_body},
-    fix_sign(UnsignedResult, Result).
+m___rand__([u, u], _Io, u). % Place holder to get fail instead of exception.
 m___or__([t_int(L), t_int(R)], _Io, t_int(Result)) :-
     no_sign(L, Ls),
     no_sign(R, Rs),
     {int_or_body},
     fix_sign(UnsignedResult, Result).
-m___ror__([t_int(R), t_int(L)], _Io, t_int(Result)) :-
-    no_sign(L, Ls),
-    no_sign(R, Rs),
-    {int_or_body},
-    fix_sign(UnsignedResult, Result).
+m___ror__([u, u], _Io, u). % Place holder to get fail instead of exception.
 m___xor__([t_int(L), t_int(R)], _Io, t_int(Result)) :-
     no_sign(L, Ls),
     no_sign(R, Rs),
     {int_xor_body},
     fix_sign(UnsignedResult, Result).
-m___rxor__([t_int(R), t_int(L)], _Io, t_int(Result)) :-
-    no_sign(L, Ls),
-    no_sign(R, Rs),
-    {int_xor_body},
-    fix_sign(UnsignedResult, Result).
+m___rxor__([u, u], _Io, u). % Place holder to get fail instead of exception.
 m___neg__([t_int(I)], _Io, t_int(Neg)) :-
     Neg #= -I.
 m___invert__([t_int(I)], _Io, t_int(Result)) :-
@@ -1633,6 +1681,12 @@ list_sum([], Acc, Acc).
 list_sum([H|T], Acc, Result) :-
     m___add__([Acc, H], _Io, NextAcc),
     list_sum(T, NextAcc, Result).
+
+label_var(t_int(I)) :-
+    label([I]).
+label_var(X) :-
+    X \= t_int(_),
+    write(X), nl.
 
 % A, B, Max, Min
 sort2(A, B, A, B) :- A #> B.
