@@ -1666,8 +1666,7 @@ g_type([t_str(_)], _Io, g_str).
 g_type([t_list(_)], _Io, g_list).
 g_type([t_int(_)], _Io, g_int).
 g_type([t_range(_, _, _)], _Io, g_range).
-g_type([t_object(Type, _Attrs, _Ref)], _Io, Type) :-
-    not(member(Type, [g_str, g_list, g_int, g_range])).
+g_type([t_object(Type, _Attrs, _Ref)], _Io, Type).
 g_len([Object], Io, Result) :-
     m___len__([Object], Io, Result).
 g_sum([t_list(Es)], _Io, Result) :-
@@ -1733,7 +1732,7 @@ io_write([H|T]) :-
 start :-
     g_main([], Io, _) -> 
      (io(Printed) = Io, io_write(Printed))
-     ; (write('Goal ''main'' failed.'), nl)
+     ; nl, (write('   *** Goal ''main'' failed. ***'), nl)
     ,
     halt.
 

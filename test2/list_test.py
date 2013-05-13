@@ -75,65 +75,20 @@ def list_test8_in():
 def list_test9_type():
     assert type([]) == list
 
-def pattern_func(x: [len(it) == 2]):
-    return 2
-
-def pattern_func(x: [len(it) == 3]):
-    return 3
-
-def list_test10_pattern():
-    assert list(1 in it) == [1]
-    assert [1 in it and len(it) > 3] != [0, 1, 2]
-    assert [1 in it and len(it) > 3] == [0, 1, 2, 3]
-
-    l = [[1], [-1, 0, 1], [0, 1, 2], [1, 2, 3]]
-    p = [len(it) > 1 and it[0] == 1]
-    assert l.index(p) == 3
-
-    assert len([len(it) < 4] + [len(it) < 2]) < 6
-
-    l = [it[0] == 1 and it[1] == 2]
-    assert l[0] == 1
-    assert l[1] == 2
-    
-    elem = 10
-    l = [it[0] == elem]
-    assert str(l[0]) == "10"
-
-    e0 = free
-    e1 = free
-    l0 = [it[0] == e0 and it[1] == e1]
-    l1 = [it[0] == e1 and it[1] == e0]
-    assert l0 == [1, 2]
-    assert str(l1[0]) == "2"
-    assert str(l1[1]) == "1"
-
-    l = [it.index(0) < it.index(10)]
-    assert l == [1, 2, 0, 4, 5, 10]
-
-    assert pattern_func([1, 2]) == 2
-    assert pattern_func([1, 2, 3]) == 3
-
-    l = [sum(it) == 6]
-    assert l == [1, 2, 3]
-    
-    l = [[1], [2], [3], [4], [5]]
-    assert l.index([3 in it]) == 2
-
-def list_test11_index():
+def list_test10_index():
     assert [1, 2, 3].index(1) == 0
     assert [0, 1, 2, 3].index(1) == 1
     assert [0, 1, [2], 3].index([2]) == 2
     assert [0, 1, 2, 1].index(1) == 3
 
-def list_test12_count():
+def list_test11_count():
     assert [1, 2, 1].count(1) == 2
 
-def list_test13_sum():
+def list_test12_sum():
     assert sum([1, 2, 3]) == 6
     assert sum(["a", "b", "c"], "") == "abc"
 
-def list_test14_iter():
+def list_test13_iter():
     lst = [1, 2, 3, 4]
     i = iter(lst)
     l0 = i.__next__()
@@ -147,7 +102,7 @@ def list_test14_iter():
     assert l3 == 4
     assert l4 == StopIteration
 
-def list_test15_iter_in_while_loop():
+def list_test14_iter_in_while_loop():
     lst = [1, 2, 3, 4]
     res = []
     i = iter(lst)
@@ -156,6 +111,64 @@ def list_test15_iter_in_while_loop():
         res.append(el)
         el = i.__next__()
     assert res == lst
+
+def pattern_func(x: [len(it) == 2]):
+    return 2
+
+def pattern_func(x: [len(it) == 3]):
+    return 3
+
+def list_test15_pattern_matches_list_literal():
+    assert list(1 in it) == [1]
+    assert [1 in it and len(it) > 3] != [0, 1, 2]
+    assert [1 in it and len(it) > 3] == [0, 1, 2, 3]
+
+    l = [it.index(0) < it.index(10)]
+    assert l == [1, 2, 0, 4, 5, 10]
+
+    assert pattern_func([1, 2]) == 2
+    assert pattern_func([1, 2, 3]) == 3
+
+    l = [sum(it) == 6]
+    assert l == [1, 2, 3]
+
+def list_test16_pattern_captures_locals():        
+    elem = 10
+    l = [it[0] == elem]
+    assert str(l[0]) == "10"
+
+    e0 = free
+    e1 = free
+    l0 = [it[0] == e0 and it[1] == e1]
+    l1 = [it[0] == e1 and it[1] == e0]
+    assert l0 == [1, 2]
+    assert str(l1[0]) == "2"
+    assert str(l1[1]) == "1"
+
+def list_test17_pattern_find_element():
+    l = [[1], [-1, 0, 1], [0, 1, 2], [1, 2, 3]]
+    p = [len(it) > 1 and it[0] == 1]
+    assert l.index(p) == 3
+    
+    l = [[1], [2], [3], [4], [5]]
+    assert l.index([3 in it]) == 2
+
+def list_test18_pattern_index():    
+    l = [it[0] == 1 and it[1] == 2]
+    assert l[0] == 1
+    assert l[1] == 2
+
+def list_test19_pattern_len():
+    assert len([len(it) == 4] + [len(it) == 2]) == 6
+    assert len([len(it) < 4] + [len(it) < 2]) < 6
+    # Doesn't work.
+#    assert len([len(it) < 4] + [len(it) < 2]) == [1, 2, 3]
+
+def list_test20_pattern_match_against_other_pattern():
+    p0 = [len(it) == 1]
+    p1 = [1 in it]
+    assert p0 == p1
+    assert str(p0) == str(p1) # == "[1]"
 
 def main():
     list_test0_length_of_list()
@@ -168,10 +181,15 @@ def main():
     list_test7_multiply_referenced()
     list_test8_in()
     list_test9_type()
-    list_test10_pattern()
-    list_test11_index()
-    list_test12_count()
-    list_test13_sum()
-    list_test14_iter()
-    list_test15_iter_in_while_loop()
+    list_test10_index()
+    list_test11_count()
+    list_test12_sum()
+    list_test13_iter()
+    list_test14_iter_in_while_loop()
+    list_test15_pattern_matches_list_literal()
+    list_test16_pattern_captures_locals()
+    list_test17_pattern_find_element()
+    list_test18_pattern_index()
+    list_test19_pattern_len()
+    list_test20_pattern_match_against_other_pattern()
     print("list_test")
