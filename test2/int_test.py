@@ -23,11 +23,10 @@ def int_test2_mult():
 def int_test3_div():
     assert 6 // 2 == 3
 
-    # TODO: must provide additional information to the constraint solver as
-    # 42..47 are all acceptable solutions.
     x = free
     assert x // 6 == 7
-    assert x == 42 
+    assert str(x) == "?int:42..47"
+    assert x == 42
 
 
 def int_test4_mod():
@@ -162,6 +161,17 @@ def int_test21_factorial_using_while():
     assert 5040 == wfac(n)
     assert n == 7
 
+def int_test22_abs():
+    f = free
+    assert abs(f) == 2
+    assert f < 0
+    assert str(f) == "-2"
+
+    f = free
+    assert abs(f) == 2
+    assert f > 0
+    assert str(f) == "2"
+
 def main():
     int_test0_add()
     int_test1_sub()
@@ -179,7 +189,5 @@ def main():
     int_test13_pattern()
     int_test20_factorial()
     int_test21_factorial_using_while()
+    int_test22_abs()
     print("int_test")
-
-
-# 12 - 20

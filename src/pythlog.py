@@ -1116,6 +1116,27 @@ class IdentifyFindallExpressions(NodeTransformer):
             values[0] = ast.Compare(left=left, ops=ops, comparators=comparators)
             return FindAll(target=target, expr=values[0])
         else:
+            return self.copy_node(node, elts=self.visit(node.elts))
+
+class IdentifyImplicitFreeVars(NodeTransformer):
+    def __init__(self):
+        self._current_func_body = []
+
+    def visit_FunctionDef(self, node):
+        self._current_func_body = []
+        for stmt in node.body:
+            trans_stmt = self.visit(stmt)
+            self._current_func_body.append(trans_stmt)
+        return self.copy_node(node, body=self._current_func_body)
+
+    def visit_Attribute(self, node):
+        # Finds __newfreevar__.whatever
+        if type(node.value) == ast.Name and node.value.id == '__newfreevar__':
+            assign_stmt = ast.Assign(targets=[ast.Name(node.attr, ast.Store())],
+                                     value=Free())
+            self._current_func_body.append(assign_stmt)
+            return ast.Name(node.attr, ast.Load())
+        else:
             return node
 
 
@@ -1212,6 +1233,13 @@ def identify_findall_expression(parse_tree):
     """
     return IdentifyFindallExpressions().visit(parse_tree)
 
+def identify_implicit_free_vars(parse_tree):
+    """
+    Identifies a magic sequence of tokens that the preprocessor emits for
+    implicitly defined free variables (!var).
+    """
+    return IdentifyImplicitFreeVars().visit(parse_tree)
+
 def preprocess(text):
     """
     Rewrites the sequence:
@@ -1228,6 +1256,8 @@ def preprocess(text):
     for toknum, tokval, _, _, _  in g:
         if last_was_bracket and toknum == NAME and tokval == 'all':
             result.append((NAME, '__findallexpr__ and'))
+        elif tokval == '!':
+            result.append((NAME, '__newfreevar__.'))
         else:
             result.append((toknum, tokval))
         last_was_bracket = (toknum == OP and tokval == '[')
@@ -1235,9 +1265,11 @@ def preprocess(text):
 
 def compile_module(module_code):
     allocator = Allocator()
-    parse_tree = ast.parse(preprocess(module_code))
+    pp_code = preprocess(module_code)
+    parse_tree = ast.parse(pp_code)
     global_syms = global_symbols(parse_tree)
     parse_tree = identify_findall_expression(parse_tree)
+    parse_tree = identify_implicit_free_vars(parse_tree)
     parse_tree = define_type_dependent_builtins(parse_tree)
     parse_tree = for_to_while_loop(parse_tree)
     parse_tree = arg_list_match_to_assert(parse_tree, global_syms)
@@ -1575,6 +1607,26 @@ m_index([t_tuple(Es), E], _Io, t_int(R)) :-
     nth0(R, Es, E).
 m_index([t_list(Es), E], _Io, t_int(R)) :-
     nth0(R, Es, E).
+m_insert([List, t_int(Idx), E], _Io, g_None) :-
+    t_list(Es) = List,
+    list_insert(Es, Idx, E, OutEs),
+    setarg(1, List, OutEs).
+m_pop([List], _Io, Result) :-
+    t_list(Es) = List,
+    append(ButLast, [Result], Es),
+    setarg(1, List, ButLast).
+m_remove([List, E], _Io, g_None) :-
+    t_list(Es) = List,
+    select(E, Es, Res),
+    setarg(1, List, Res).
+m_reverse([List], _Io, g_None) :-
+    t_list(Es) = List,
+    reverse(Es, Res),
+    setarg(1, List, Res).
+m_sort([List], _Io, g_None) :-
+    t_list(Es) = List,
+    sort(Es, Res),
+    setarg(1, List, Res).
 
 count_elem([], _, Result, Result).
 count_elem([H|T], E, Acc, Result) :-
@@ -1584,14 +1636,23 @@ count_elem([H|T], H, Acc, Result) :-
     NextAcc is Acc + 1,
     count_elem(T, H, NextAcc, Result).
 
-mul_list(_, 0, _, []).
-mul_list(_, 1, Acc, Acc).
-mul_list(Es, R, Acc, Result) :-
+list_mul(_, 0, _, []).
+list_mul(_, 1, Acc, Acc).
+list_mul(Es, R, Acc, Result) :-
     append(Acc, Es, NextAcc),
     NextR #= R - 1,
-    mul_list(Es, NextR, NextAcc, Result).
+    list_mul(Es, NextR, NextAcc, Result).
 
-
+list_insert(Es, 0, E, [E|Es]).
+list_insert([H|Es], Idx, E, [H|OutEs]) :-
+    Idx #> 0,
+    NextIdx #= Idx - 1,
+    list_insert(Es, NextIdx, E, OutEs).
+list_insert(Es, NegIdx, E, OutEs) :-
+    NegIdx #< 0,
+    length(Es, Length),
+    PosIdx #= Length + NegIdx,
+    list_insert(Es, PosIdx, E, OutEs).
 
 join_strs(_, [t_str(H)], Acc, Result) :-
     !,
@@ -1604,9 +1665,13 @@ join_strs(_, [], Result, Result).
 
 to_print_string([], Acc, t_str(Acc)).
 to_print_string([H|T], Acc, Result) :-
+
     g_str([H], _Io, t_str(HStr)),
     append(Acc, HStr, NextAcc),
     to_print_string(T, NextAcc, Result).
+
+g_abs([t_int(I)], _Io, t_int(R)) :-
+    R #= abs(I).
 
 g_write(Objects, _Io, g_None) :-
     write(Objects), nl.
@@ -1616,9 +1681,12 @@ g_print(Objects, Io, g_None) :-
     append(List, [Str], Result),
     setarg(1, Io, Result).
 
+m___str__([Object], _Io, t_str("?object")) :- var(Object), !.
 m___str__([t_str(Chars)], _Io, t_str(Chars)).
-m___repr__([t_bool(0)], _Io, t_str("False")).
-m___repr__([t_bool(1)], _Io, t_str("True")).
+m___repr__([Object], _Io, t_str("?object")) :- var(Object), !.
+m___repr__([t_bool(B)], _Io, t_str("False")) :- B == 0.
+m___repr__([t_bool(B)], _Io, t_str("True")) :- B == 1.
+m___repr__([t_bool(B)], _Io, t_str("?bool")) :- var(B).
 m___repr__([t_int(I)], _Io, t_str(Repr)) :-
     integer(I), !,
     number_codes(I, Repr).
@@ -1662,6 +1730,7 @@ repr_list([H|T], Acc, Res) :-
     repr_list(T, NextAcc, Res).
 
 
+g_type([t_bool(_)], _Io, g_bool).
 g_type([t_str(_)], _Io, g_str).
 g_type([t_list(_)], _Io, g_list).
 g_type([t_int(_)], _Io, g_int).

@@ -91,6 +91,22 @@ def str_test14_findall():
     # 'solutions'. Why?
     #print(solutions)
 
+def str_test15_stringify_variable():
+    assert str(free) == "?object"
+    assert repr(free) == "?object"
+    
+    b = free
+    assert type(b) == bool
+    assert str(b) == "?bool"
+    assert repr(b) == "?bool"
+
+    i = free
+    assert type(i) == int
+    assert i > 0
+    assert i < 10
+    assert str(i) == "?int:1..9"
+    assert repr(i) == "?int:1..9"
+
 def main():
     str_test0_type()
     str_test1_length()
@@ -107,4 +123,5 @@ def main():
     str_test12_in_equation()
     str_test13_pattern()
     str_test14_findall()
+    str_test15_stringify_variable()
     print("str_test")
