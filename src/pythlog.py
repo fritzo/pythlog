@@ -181,7 +181,7 @@ class PrettyPrinter(NodeVisitor):
     def visit_Pass(self, node):
         self._line("pass")
 
-    def visit_Assign(self, node):
+    def visit_SimpleAssign(self, node):
         targets = ", ".join(self.visit(t) for t in node.targets)
         value = self.visit(node.value)
         self._line("%s = %s" % (targets, value))
@@ -452,7 +452,7 @@ class StatementTranslator(ast.NodeVisitor):
         self._code.append('i_assert(%s)' % test)
         return self._code
 
-    def visit_Assign(self, node):
+    def visit_SimpleAssign(self, node):
         assert len(node.targets) == 1, ast.dump(node)
         value = self.visit(node.value)
         if type(node.targets[0]) == LocalName:
@@ -567,6 +567,29 @@ class Free(ast.expr):
     def __init__(self):
         ast.expr.__init__(self)
 
+class Match(ast.expr_context):
+    """
+    Plays the same role as ast.Load and ast.Store but with different semantics.
+    If the variable is (partly) bound, then will be matched. If the variable doesn't
+    exists in the scope, it is instroduced as a new free variable and then matched.
+    """
+    def __init__(self):
+        ast.expr_context.__init__(self)
+
+class MatchAssign(ast.Assign):
+    """
+    Assignment of the style x + 1 = 9
+    """
+    def __init__(self, targets=None, value=None):
+        ast.Assign.__init__(self, targets=targets, value=value)
+
+class SimpleAssign(ast.Assign):
+    """
+    Assignment of the style x = 9.
+    """
+    def __init__(self, targets=None, value=None):
+        ast.Assign.__init__(self, targets=targets, value=value)
+
 class It(ast.expr):
     """
     Represents the ast for the keyword 'it'.
@@ -602,6 +625,40 @@ def maxmin(x, y):
     if x > y:
         return x, y
     return y, x
+
+class RewriteMatchAssignment(NodeTransformer):
+    def __init__(self):
+        self._locals_and_args = set()
+        self._body = []
+
+    def visit_FunctionDef(self, node):
+        self._locals_and_args = set(a.arg for a in node.args.args)
+        self._body = []
+        for stmt in node.body:
+            self._body.append(self.visit(stmt))
+        return self.copy_node(node, body=self._body)
+
+    def visit_LocalName(self, node):
+        self._locals_and_args.add(node.id)
+        return node
+
+    def visit_SimpleAssign(self, node):
+        if not (type(node.value) == GlobalName and node.value.id == 'uninitialized'):
+            self.visit(node.targets[0])
+        return node
+
+    def visit_MatchAssign(self, node):
+        matched_vars = set()
+        class FindVars(NodeTransformer):
+            def visit_LocalName(self, node):
+                assert type(node.ctx) == Match
+                matched_vars.add(node.id)
+                return node
+        FindVars().visit(node)
+        introduced_vars = matched_vars - self._locals_and_args
+        for var in introduced_vars:
+            self._body.append(assignment(var, Free()))
+        return assert_equal(node.targets[0], node.value)
 
 class SsaRewriter(NodeTransformer):
     """
@@ -791,7 +848,7 @@ class SsaRewriter(NodeTransformer):
             assert False, node.id
         return self.copy_node(node, id=id)
 
-    def visit_Assign(self, node):
+    def visit_SimpleAssign(self, node):
         # NOTE: 'value' and 'targets' must be visited in this order due to
         # side-effects in the visit-method.
         value = self.visit(node.value)
@@ -871,8 +928,8 @@ def assignment(dst, value):
     string). If strings are provided, then they are wrapped in ast node
     LocalName.
     """
-    return ast.Assign(targets=[string_to_ast_node(dst, store=True)],
-                      value=string_to_ast_node(value))
+    return SimpleAssign(targets=[string_to_ast_node(dst, store=True)],
+                        value=string_to_ast_node(value))
 
 def assert_equal(lhs, rhs):
     """
@@ -927,7 +984,7 @@ class SymbolResolver(NodeTransformer):
         # local symbol and a global symbol wit the same name. This is wrong.
         if node.id in self._globals:
             return GlobalName(id='g_' + node.id, ctx=node.ctx)
-
+            
         self._locals_and_args.add(node.id)
         return LocalName(id=node.id, ctx=node.ctx)
 
@@ -1118,6 +1175,37 @@ class IdentifyFindallExpressions(NodeTransformer):
         else:
             return self.copy_node(node, elts=self.visit(node.elts))
 
+
+class ReplaceLoadWith(NodeTransformer):
+    def __init__(self, node):
+        self._node = node
+    def visit_Load(self, _node):
+        return self._node
+
+class IdentifyAssignments(NodeTransformer):
+    def visit_Expr(self, node):
+        if (type(node.value) == ast.BoolOp and
+            type(node.value.values[1]) == ast.Compare and
+            type(node.value.values[1].left) == ast.Name and
+            node.value.values[1].left.id == '__assign__'):
+
+            left = node.value.values[0]
+            right = node.value.values[1].comparators[0]
+            if type(left) == ast.BinOp: # "Assignment" to expression, e.g., x + 5 = 8
+                left = ReplaceLoadWith(Match()).visit(node.value.values[0])
+                return MatchAssign(targets=[left], value=right)
+            elif type(left) == ast.Name: # Normal assignment, e.g., x = 9
+                target = ast.Name(id=left.id, ctx=ast.Store())
+            elif type(left) == ast.Attribute: # Attribute assignment, e.g., x.y = 9
+                target = ast.Attribute(value=left.value, attr=left.attr, ctx=ast.Store())
+            elif type(left) == ast.Subscript: # Element assignment, e.g., x[0] = 9
+                target = ast.Subscript(value=left.value, slice=left.slice, ctx=ast.Store())
+            else:
+                assert False, ast.dump(left)
+            return SimpleAssign(targets=[target], value=right)
+        else:
+            return node
+
 class IdentifyImplicitFreeVars(NodeTransformer):
     def __init__(self):
         self._current_func_body = []
@@ -1132,13 +1220,21 @@ class IdentifyImplicitFreeVars(NodeTransformer):
     def visit_Attribute(self, node):
         # Finds __newfreevar__.whatever
         if type(node.value) == ast.Name and node.value.id == '__newfreevar__':
-            assign_stmt = ast.Assign(targets=[ast.Name(node.attr, ast.Store())],
-                                     value=Free())
+            assign_stmt = SimpleAssign(targets=[ast.Name(node.attr, ast.Store())],
+                                       value=Free())
             self._current_func_body.append(assign_stmt)
             return ast.Name(node.attr, ast.Load())
         else:
             return node
 
+def rewrite_match_assignment(parse_tree):
+    """
+    rewrites match assignments (e.g., y + x + 2 = 4) to
+        y = free
+        assert y + x + 2 == 4
+    where y is a previously unassigned variable and x is an assigned variable.
+    """
+    return RewriteMatchAssignment().visit(parse_tree)
 
 def ssa_form(parse_tree, allocator):
     """Rewrite functions into static single assignment form"""
@@ -1233,6 +1329,14 @@ def identify_findall_expression(parse_tree):
     """
     return IdentifyFindallExpressions().visit(parse_tree)
 
+def identify_assignments(parse_tree):
+    """
+    Identifies a magic sequence of tokens that the preprocessor emits for
+    findall-expressions and instantiates dedicated ast nodes for findall-
+    expressions.
+    """
+    return IdentifyAssignments().visit(parse_tree)
+
 def identify_implicit_free_vars(parse_tree):
     """
     Identifies a magic sequence of tokens that the preprocessor emits for
@@ -1258,6 +1362,8 @@ def preprocess(text):
             result.append((NAME, '__findallexpr__ and'))
         elif tokval == '!':
             result.append((NAME, '__newfreevar__.'))
+        elif tokval == '=':
+            result.append((NAME, ' or __assign__ == '))
         else:
             result.append((toknum, tokval))
         last_was_bracket = (toknum == OP and tokval == '[')
@@ -1268,6 +1374,7 @@ def compile_module(module_code):
     pp_code = preprocess(module_code)
     parse_tree = ast.parse(pp_code)
     global_syms = global_symbols(parse_tree)
+    parse_tree = identify_assignments(parse_tree)
     parse_tree = identify_findall_expression(parse_tree)
     parse_tree = identify_implicit_free_vars(parse_tree)
     parse_tree = define_type_dependent_builtins(parse_tree)
@@ -1275,6 +1382,7 @@ def compile_module(module_code):
     parse_tree = arg_list_match_to_assert(parse_tree, global_syms)
     parse_tree = identify_pattern_literals(parse_tree, global_syms)
     parse_tree = resolve_global_symbols(parse_tree, global_syms)
+    parse_tree = rewrite_match_assignment(parse_tree)
     parse_tree = single_return_point(parse_tree)
     parse_tree = ssa_form(parse_tree, allocator)
 
