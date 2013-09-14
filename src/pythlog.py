@@ -453,7 +453,7 @@ class StatementTranslator(ast.NodeVisitor):
 
     # Statement nodes
 
-    def visit_Assert(self, node):
+    def visit_Assert(self, node)
         test = self.visit(node.test)
         self._code.append('i_assert(%s)' % test)
         return self._code
@@ -1837,6 +1837,8 @@ m___repr__([t_list(Es)], _Io, t_str(Repr)) :-
 m___repr__([t_tuple(Es)], _Io, t_str(Repr)) :-
     repr_list(Es, "(", Res),
     append(Res, ")", Repr).
+m___repr__([t_set(Es)], _Io, t_str(R)) :-
+    var(Es), !, R = "?set".
 m___repr__([t_set(Es)], _Io, t_str(Repr)) :-
     repr_list(Es, "{{", Res),
     append(Res, "}}", Repr).
@@ -1863,6 +1865,7 @@ repr_list([H|T], Acc, Res) :-
     repr_list(T, NextAcc, Res).
 
 
+g_type([t_set(_)], _Io, g_set).
 g_type([t_bool(_)], _Io, g_bool).
 g_type([t_str(_)], _Io, g_str).
 g_type([t_list(_)], _Io, g_list).
@@ -1909,9 +1912,6 @@ label_var(X) :-
 sort2(A, B, A, B) :- A #> B.
 sort2(A, B, B, A) :- A #=< B.
 
-m___len__([t_range(Start, Stop, Step)], _Io, t_int(L)) :-
-    sort2(Start, Stop, Low, High),
-    L #= (Low - High - 1) / abs(Step) + 1.
 m___len__([t_set(Elts)], _Io, t_int(L)) :-
     length(Elts, L).
 m___len__([t_list(Elts)], _Io, t_int(L)) :-
@@ -1920,6 +1920,9 @@ m___len__([t_str(Elts)], _Io, t_int(L)) :-
     length(Elts, L).
 m___len__([t_tuple(Elts)], _Io, t_int(L)) :-
     length(Elts, L).
+m___len__([t_range(Start, Stop, Step)], _Io, t_int(L)) :-
+    sort2(Start, Stop, Low, High),
+    L #= (Low - High - 1) / abs(Step) + 1.
 m___iter__([t_list(Elts)], _Io, t_list_iterator(Elts)).
 m___iter__([t_range(L, H, S)], _Io, t_range_iterator(L, H, S)).
 
