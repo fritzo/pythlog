@@ -330,6 +330,12 @@ class StatementTranslator(ast.NodeVisitor):
         elts = ", ".join(self.visit(e) for e in node.elts)
         return "t_list([%s])" % elts
 
+    def visit_Set(self, node):
+        elts = ", ".join(self.visit(e) for e in node.elts)
+        result = self._allocator.tempvar()
+        self._code.append("list_to_ord_set([%s], %s)" % (elts, result))
+        return "t_set(%s)" % result
+
     def visit_FindAll(self, node):
         result = self._allocator.tempvar()
         target = self.visit(node.target)
@@ -651,8 +657,8 @@ class RewriteMatchAssignment(NodeTransformer):
         matched_vars = set()
         class FindVars(NodeTransformer):
             def visit_LocalName(self, node):
-                assert type(node.ctx) == Match
-                matched_vars.add(node.id)
+                if type(node.ctx) == Match:
+                    matched_vars.add(node.id)
                 return node
         FindVars().visit(node)
         introduced_vars = matched_vars - self._locals_and_args
@@ -1191,17 +1197,15 @@ class IdentifyAssignments(NodeTransformer):
 
             left = node.value.values[0]
             right = node.value.values[1].comparators[0]
-            if type(left) == ast.BinOp: # "Assignment" to expression, e.g., x + 5 = 8
-                left = ReplaceLoadWith(Match()).visit(node.value.values[0])
-                return MatchAssign(targets=[left], value=right)
-            elif type(left) == ast.Name: # Normal assignment, e.g., x = 9
+            if type(left) == ast.Name: # Normal assignment, e.g., x = 9
                 target = ast.Name(id=left.id, ctx=ast.Store())
             elif type(left) == ast.Attribute: # Attribute assignment, e.g., x.y = 9
                 target = ast.Attribute(value=left.value, attr=left.attr, ctx=ast.Store())
             elif type(left) == ast.Subscript: # Element assignment, e.g., x[0] = 9
                 target = ast.Subscript(value=left.value, slice=left.slice, ctx=ast.Store())
             else:
-                assert False, ast.dump(left)
+                target = ReplaceLoadWith(Match()).visit(node.value.values[0])
+                return MatchAssign(targets=[target], value=right)
             return SimpleAssign(targets=[target], value=right)
         else:
             return node
@@ -1447,6 +1451,7 @@ def int_xor_body():
 
 BUILTINS = """
 ?- use_module(library(clpfd)).
+?- use_module(library(ordsets)).
 
 i_assign(Var, Var).
 
@@ -1553,6 +1558,9 @@ m___contains__([t_str(_), t_str(_)], _Io, t_bool(0)).
 m___contains__([t_tuple(Elts), Object], _Io, t_bool(R)) :-
     nth0(_, Elts, Object), R = 1.
 m___contains__([t_tuple(_), _], _Io, t_bool(0)).
+m___contains__([t_set(Elts), Object], _Io, t_bool(R)) :-
+    ord_memberchk(Object, Elts), !, R = 1.
+m___contains__([t_set(_), _], _Io, t_bool(0)).
 
 
 i_return(Var, Var).
@@ -1641,8 +1649,15 @@ m___invert__([t_str(InChars)], _Io, t_str(OutChars)) :-
 
 m___lt__([t_int(L), t_int(R)], _Io, t_bool(Result)) :-
     Result #<==> (L #< R).
+m___lt__([t_set(L), t_set(R)], Io, t_bool(Result)) :-
+    L \= R,
+    m_issubset([t_set(L), t_set(R)], Io, t_bool(1)),
+    !, Result = 1.
+m___lt__([t_set(_), t_set(_)], _Io, t_bool(0)).
 m___le__([t_int(L), t_int(R)], _Io, t_bool(Result)) :-
     Result #<==> (L #=< R).
+m___le__([t_set(L), t_set(R)], Io, Result) :-
+    m_issubset([t_set(L), t_set(R)], Io, Result).
 
 % '?' == 63
 questionmark_to_freevar([63|InChars], [_|OutChars]) :-
@@ -1762,6 +1777,13 @@ list_insert(Es, NegIdx, E, OutEs) :-
     PosIdx #= Length + NegIdx,
     list_insert(Es, PosIdx, E, OutEs).
 
+m_issubset([t_set(L), t_set(R)], _Io, t_bool(Res)) :-
+   ord_subset(L, R), !, Res = 1.
+m_issubset([t_set(_), t_set(_)], _Io, t_bool(0)).
+m_isdisjoint([t_set(L), t_set(R)], _Io, t_bool(Res)) :-
+   ord_disjoint(L, R), !, Res = 1.
+m_isdisjoint([t_set(_), t_set(_)], _Io, t_bool(0)).
+
 join_strs(_, [t_str(H)], Acc, Result) :-
     !,
     append(Acc, H, Result).
@@ -1815,6 +1837,9 @@ m___repr__([t_list(Es)], _Io, t_str(Repr)) :-
 m___repr__([t_tuple(Es)], _Io, t_str(Repr)) :-
     repr_list(Es, "(", Res),
     append(Res, ")", Repr).
+m___repr__([t_set(Es)], _Io, t_str(Repr)) :-
+    repr_list(Es, "{{", Res),
+    append(Res, "}}", Repr).
 
 g_str(ArgList, Io, Str) :-
     m___str__(ArgList, Io, Str), !.
@@ -1857,7 +1882,18 @@ g_next(Args, Io, Result) :-
 g_range([t_int(Stop)], _Io, t_range(0, Stop, 1)).
 g_range([t_int(Start), t_int(Stop)], _Io, t_range(Start, Stop, 1)).
 g_range([t_int(Start), t_int(Stop), t_int(Step)], _Io, t_range(Start, Stop, Step)).
-
+g_set([], _Io, t_set([])).
+g_set(Args, Io, t_set(Elts)) :-
+    g_iter(Args, Io, Iter),
+    iter_to_ordset(Iter, Io, [], Elts).
+iter_to_ordset(Iter, Io, Acc, Elts) :-
+    g_next([Iter], Io, Elem),
+    Elem \= g_StopIteration,
+    ord_add_element(Acc, Elem, NextAcc),
+    iter_to_ordset(Iter, Io, NextAcc, Elts).
+iter_to_ordset(Iter, Io, Acc, Acc) :-
+    g_next([Iter], Io, Elem),
+    Elem == g_StopIteration.
 
 list_sum([], Acc, Acc).
 list_sum([H|T], Acc, Result) :-
@@ -1876,6 +1912,8 @@ sort2(A, B, B, A) :- A #=< B.
 m___len__([t_range(Start, Stop, Step)], _Io, t_int(L)) :-
     sort2(Start, Stop, Low, High),
     L #= (Low - High - 1) / abs(Step) + 1.
+m___len__([t_set(Elts)], _Io, t_int(L)) :-
+    length(Elts, L).
 m___len__([t_list(Elts)], _Io, t_int(L)) :-
     length(Elts, L).
 m___len__([t_str(Elts)], _Io, t_int(L)) :-

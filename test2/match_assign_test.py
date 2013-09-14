@@ -11,6 +11,31 @@ def match_assign_test0_simple_arithmetic_match():
     (b + a) * 2 = 6
     assert str(b) == "2"
     
+
+def func(x):
+    return 1 + x
+
+def func(x):
+    return x
+
+def match_assign_test1_assign_function_calls():
+    func(x) = 8
+    assert str(x) == "7"
+
+    func(z) = "9"
+    assert z == "9"
+
+class X:
+    def __init__(self, a):
+        self._a = a
+
+def match_assign_test2_decopose_object():
+    x = X(7)
+    X(z) = x
+    assert str(z) == "7"
+
 def main():
     match_assign_test0_simple_arithmetic_match()
+    match_assign_test1_assign_function_calls()
+    match_assign_test2_decopose_object()
     print("match_assign_test")
