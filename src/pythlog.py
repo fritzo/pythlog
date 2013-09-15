@@ -431,8 +431,7 @@ class StatementTranslator(ast.NodeVisitor):
             self._code.append('i_bool%s(%s, %s, %s)' % (
                 op, result, v, next_result))
             result = next_result
-        return result
-         
+        return result         
 
     def visit_Compare(self, node):
         assert len(node.ops) == 1, len(node.ops)
@@ -454,8 +453,24 @@ class StatementTranslator(ast.NodeVisitor):
     # Statement nodes
 
     def visit_Assert(self, node):
-        test = self.visit(node.test)
-        self._code.append('i_assert(%s)' % test)
+        if (type(node.test) == ast.Compare and
+            type(node.test.ops[0]) == ast.Eq and
+            type(node.test.left) != Pattern and
+            type(node.test.comparators[0]) != Pattern):
+            cmpnode = node.test
+            assert len(cmpnode.ops) == 1, len(cmpnode.ops)
+            assert len(cmpnode.comparators) == 1
+            idx = len(self._code)
+            self._code.append("/placeholder/")
+            op = type(cmpnode.ops[0]).__name__.lower()
+            lhs = self.visit(cmpnode.left)
+            rhs = self.visit(cmpnode.comparators[0])
+            self._code[idx] = "%s = %s" % (lhs, rhs)
+        else:
+            idx = len(self._code)
+            self._code.append("/placeholder/")
+            test = self.visit(node.test)
+            self._code[idx] = "%s = t_bool(1)" % test
         return self._code
 
     def visit_Assign(self, node):
@@ -463,7 +478,7 @@ class StatementTranslator(ast.NodeVisitor):
         value = self.visit(node.value)
         if type(node.targets[0]) == LocalName:
             target = self.visit(node.targets[0])
-            self._code.append('i_assign(%s, %s)' % (target, value))
+            self._code.append('%s = %s' % (target, value))
         elif type(node.targets[0]) == ast.Attribute:
             target = self.visit(node.targets[0].value)
             attr = node.targets[0].attr
@@ -1448,11 +1463,6 @@ def int_xor_body():
 BUILTINS = """
 ?- use_module(library(clpfd)).
 ?- use_module(library(ordsets)).
-
-i_assign(Var, Var).
-
-i_assert(t_bool(1)).
-
 
 i_binadd(L, R, Result) :-
     m___add__([L, R], _, Result).
