@@ -181,7 +181,7 @@ class PrettyPrinter(NodeVisitor):
     def visit_Pass(self, node):
         self._line("pass")
 
-    def visit_SimpleAssign(self, node):
+    def visit_Assign(self, node):
         targets = ", ".join(self.visit(t) for t in node.targets)
         value = self.visit(node.value)
         self._line("%s = %s" % (targets, value))
@@ -453,12 +453,12 @@ class StatementTranslator(ast.NodeVisitor):
 
     # Statement nodes
 
-    def visit_Assert(self, node)
+    def visit_Assert(self, node):
         test = self.visit(node.test)
         self._code.append('i_assert(%s)' % test)
         return self._code
 
-    def visit_SimpleAssign(self, node):
+    def visit_Assign(self, node):
         assert len(node.targets) == 1, ast.dump(node)
         value = self.visit(node.value)
         if type(node.targets[0]) == LocalName:
@@ -582,14 +582,16 @@ class Match(ast.expr_context):
     def __init__(self):
         ast.expr_context.__init__(self)
 
-class MatchAssign(ast.Assign):
+class MatchStmt(ast.stmt):
     """
-    Assignment of the style x + 1 = 9
+    Match statement node, e.g., x == 9, foo(i) <= bar(z), etc.
     """
-    def __init__(self, targets=None, value=None):
-        ast.Assign.__init__(self, targets=targets, value=value)
+    def __init__(self, left=None, op=None, right=None):
+        ast.stmt.__init__(self, left=left, op=op, right=right)
+        self._fields = ('left', 'op', 'right')
+        
 
-class SimpleAssign(ast.Assign):
+class Assign(ast.Assign):
     """
     Assignment of the style x = 9.
     """
@@ -648,12 +650,12 @@ class RewriteMatchAssignment(NodeTransformer):
         self._locals_and_args.add(node.id)
         return node
 
-    def visit_SimpleAssign(self, node):
+    def visit_Assign(self, node):
         if not (type(node.value) == GlobalName and node.value.id == 'uninitialized'):
             self.visit(node.targets[0])
         return node
 
-    def visit_MatchAssign(self, node):
+    def visit_MatchStmt(self, node):
         matched_vars = set()
         class FindVars(NodeTransformer):
             def visit_LocalName(self, node):
@@ -662,9 +664,10 @@ class RewriteMatchAssignment(NodeTransformer):
                 return node
         FindVars().visit(node)
         introduced_vars = matched_vars - self._locals_and_args
+        self._locals_and_args.update(introduced_vars)
         for var in introduced_vars:
             self._body.append(assignment(var, Free()))
-        return assert_equal(node.targets[0], node.value)
+        return assert_op(node.left, node.op, node.right)
 
 class SsaRewriter(NodeTransformer):
     """
@@ -854,7 +857,7 @@ class SsaRewriter(NodeTransformer):
             assert False, node.id
         return self.copy_node(node, id=id)
 
-    def visit_SimpleAssign(self, node):
+    def visit_Assign(self, node):
         # NOTE: 'value' and 'targets' must be visited in this order due to
         # side-effects in the visit-method.
         value = self.visit(node.value)
@@ -934,14 +937,21 @@ def assignment(dst, value):
     string). If strings are provided, then they are wrapped in ast node
     LocalName.
     """
-    return SimpleAssign(targets=[string_to_ast_node(dst, store=True)],
-                        value=string_to_ast_node(value))
+    return Assign(targets=[string_to_ast_node(dst, store=True)],
+                  value=string_to_ast_node(value))
+
+def assert_op(lhs, op, rhs):
+    """
+    Assert that 'lhs' has a certain relation 'rhs' as specified by
+    'op', e.g., equal, not equal, less than, etc.
+    """
+    return ast.Assert(test=ast.Compare(left=lhs, ops=[op], comparators=[rhs]), msg=None)
 
 def assert_equal(lhs, rhs):
     """
     Assert that 'lhs' is equal to 'rhs'.
     """
-    return ast.Assert(test=ast.Compare(left=lhs, ops=[ast.Eq()], comparators=[rhs]), msg=None)
+    return assert_op(lhs, ast.Eq(), rhs)
 
 def assert_expr(expr, true_false):
     """
@@ -1188,25 +1198,13 @@ class ReplaceLoadWith(NodeTransformer):
     def visit_Load(self, _node):
         return self._node
 
-class IdentifyAssignments(NodeTransformer):
+class IdentifyMatchStmts(NodeTransformer):
     def visit_Expr(self, node):
-        if (type(node.value) == ast.BoolOp and
-            type(node.value.values[1]) == ast.Compare and
-            type(node.value.values[1].left) == ast.Name and
-            node.value.values[1].left.id == '__assign__'):
-
-            left = node.value.values[0]
-            right = node.value.values[1].comparators[0]
-            if type(left) == ast.Name: # Normal assignment, e.g., x = 9
-                target = ast.Name(id=left.id, ctx=ast.Store())
-            elif type(left) == ast.Attribute: # Attribute assignment, e.g., x.y = 9
-                target = ast.Attribute(value=left.value, attr=left.attr, ctx=ast.Store())
-            elif type(left) == ast.Subscript: # Element assignment, e.g., x[0] = 9
-                target = ast.Subscript(value=left.value, slice=left.slice, ctx=ast.Store())
-            else:
-                target = ReplaceLoadWith(Match()).visit(node.value.values[0])
-                return MatchAssign(targets=[target], value=right)
-            return SimpleAssign(targets=[target], value=right)
+        if (type(node.value) == ast.Compare):
+            op = node.value.ops[0]
+            left = ReplaceLoadWith(Match()).visit(node.value.left)
+            right = ReplaceLoadWith(Match()).visit(node.value.comparators[0]) 
+            return MatchStmt(left=left, op=op, right=right)
         else:
             return node
 
@@ -1224,8 +1222,8 @@ class IdentifyImplicitFreeVars(NodeTransformer):
     def visit_Attribute(self, node):
         # Finds __newfreevar__.whatever
         if type(node.value) == ast.Name and node.value.id == '__newfreevar__':
-            assign_stmt = SimpleAssign(targets=[ast.Name(node.attr, ast.Store())],
-                                       value=Free())
+            assign_stmt = Assign(targets=[ast.Name(node.attr, ast.Store())],
+                                 value=Free())
             self._current_func_body.append(assign_stmt)
             return ast.Name(node.attr, ast.Load())
         else:
@@ -1333,13 +1331,13 @@ def identify_findall_expression(parse_tree):
     """
     return IdentifyFindallExpressions().visit(parse_tree)
 
-def identify_assignments(parse_tree):
+def identify_match_stmts(parse_tree):
     """
-    Identifies a magic sequence of tokens that the preprocessor emits for
-    findall-expressions and instantiates dedicated ast nodes for findall-
-    expressions.
+    Identifies statements of the kind "x == 2", "x + 5 < z", "foo(a, b) != c", etc
+    (that is ast.Expr(ast.Compare(...)) nodes). These statements are rewritten into
+    MatchStmt nodes to be rewritten into ast.Assert in later stages.
     """
-    return IdentifyAssignments().visit(parse_tree)
+    return IdentifyMatchStmts().visit(parse_tree)
 
 def identify_implicit_free_vars(parse_tree):
     """
@@ -1366,8 +1364,6 @@ def preprocess(text):
             result.append((NAME, '__findallexpr__ and'))
         elif tokval == '!':
             result.append((NAME, '__newfreevar__.'))
-        elif tokval == '=':
-            result.append((NAME, ' or __assign__ == '))
         else:
             result.append((toknum, tokval))
         last_was_bracket = (toknum == OP and tokval == '[')
@@ -1378,7 +1374,7 @@ def compile_module(module_code):
     pp_code = preprocess(module_code)
     parse_tree = ast.parse(pp_code)
     global_syms = global_symbols(parse_tree)
-    parse_tree = identify_assignments(parse_tree)
+    parse_tree = identify_match_stmts(parse_tree)
     parse_tree = identify_findall_expression(parse_tree)
     parse_tree = identify_implicit_free_vars(parse_tree)
     parse_tree = define_type_dependent_builtins(parse_tree)

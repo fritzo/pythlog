@@ -128,10 +128,9 @@ def list_test14_type():
     assert type([]) == list
 
     l = free
-    assert len(l) == 0
-    write(l)
     assert type(l) == list
-#    assert str(l) == "[]"
+    assert len(l) == 0
+    assert str(l) == "[]"
 
 def list_test15_index():
     assert [1, 2, 3].index(1) == 0

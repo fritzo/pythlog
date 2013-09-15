@@ -14,7 +14,7 @@ def set_test1_construct_from_list():
 def set_test2_stringify():
     assert str({1, 2, 3}) == "{1, 2, 3}"
     assert str({3, 2, 1, 1}) == "{1, 2, 3}"
-    type(x) = set
+    type(x) == set
     assert str(x) == "?set"
 
 def set_test3_in():
@@ -42,10 +42,10 @@ def set_test5_isdisjoint():
 
 
 def set_test20_equations():
-    type(x) = set
+    type(x) == set
     assert 1 in x
     assert 2 in x
-    len(x) = 2
+    len(x) == 2
     assert str(x) == "{1, 2}"
 
 # TODO: Not powerful enough to solve this:
